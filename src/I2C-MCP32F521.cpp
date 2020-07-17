@@ -13,11 +13,14 @@
 
 #include "Wire.h"
 #include "particle.h"
+#include <math.h>
+#include <string.h>
+#include <stdint.h>
 
 void wireErrors(uint8_t i2c_bus_Status);
 void setup();
 void loop();
-#line 11 "/Users/nicholas/Documents/Particle/I2C-MCP32F521/src/I2C-MCP32F521.ino"
+#line 14 "/Users/nicholas/Documents/Particle/I2C-MCP32F521/src/I2C-MCP32F521.ino"
 typedef struct MCP39F521_Data {
 	uint16_t systemStatus;
 	uint16_t systemVersion;
@@ -94,11 +97,12 @@ void printMCP39F521Data(MCP39F521_FormattedData *data)
   Serial.print(F("Apparent Power = ")); Serial.println(data->apparentPower, 4);
 }
 
-constexpr size_t I2C_BUFFER_SIZE = 32;
+constexpr size_t I2C_BUFFER_SIZE = 35;
 uint8_t I2C_ADDRESS = 0x74;
 uint8_t numBytesToRead = 28;
 uint8_t ReadDataBuf[8];
 uint8_t byteArray[32];
+uint64_t somedata = 0;
 uint32_t checksumTotal = 0;
 uint8_t i2c_bus_Status = 0;
 int i;
@@ -115,6 +119,7 @@ void loop()
 { 
   MCP39F521_Data data;
   MCP39F521_FormattedData fData;
+
   ReadDataBuf[0] = 0xA5; // Header
   ReadDataBuf[1] = 0x08; // Num bytes
   ReadDataBuf[2] = 0x41; // Command - set address pointer
@@ -122,12 +127,12 @@ void loop()
   ReadDataBuf[4] = 0x02;
   ReadDataBuf[5] = 0x4E; // Command - read register, N bytes
   ReadDataBuf[6] = 0x20; 
-  ReadDataBuf[7] = 0x5e; // Checksum 0x05E - computed below
+  ReadDataBuf[7] = 0; // Checksum 0x05E - computed below
   for(i = 0; i < 7; i++) {
     checksumTotal += ReadDataBuf[i];
   }
   ReadDataBuf[7] = checksumTotal % 256; // 0x5E = 94 
-  Serial.print("Checksum = "); Serial.println(ReadDataBuf[7]);
+  Serial.print("Checksum = "); Serial.println(ReadDataBuf[7], HEX);
   Wire.beginTransmission(I2C_ADDRESS);
   for(i= 0; i < 8; i++) {
     Wire.write(ReadDataBuf[i]);
@@ -136,17 +141,16 @@ void loop()
   wireErrors(i2c_bus_Status);
   delay(5);
 
-  Wire.requestFrom(I2C_ADDRESS, (uint8_t)32); // request the bytes
-  size_t bytes_read = Wire.requestFrom(I2C_ADDRESS, I2C_BUFFER_SIZE);
-  //uint8_t baseline[I2C_BUFFER_SIZE];
-  if ( bytes_read == I2C_BUFFER_SIZE ) {
+  //Wire.requestFrom(I2C_ADDRESS, (uint8_t)35); // request the bytes
+  size_t bytes_read = Wire.requestFrom(WireTransmission(I2C_ADDRESS).quantity(I2C_BUFFER_SIZE).timeout(100ms));
+  if ( bytes_read <= I2C_BUFFER_SIZE ) {
     int requestDataLength = Wire.available();
-    // if (requestDataLength==(numBytesToRead + 3)) {
-      for (i = 0; i < requestDataLength ; i++) {
-        byteArray[requestDataLength - i] = Wire.read();
-        Serial.print(byteArray[requestDataLength - i], HEX); Serial.print(" ");
+      for (i = 0; i <= requestDataLength ; i++) {
+        byteArray[i] = Wire.read();
+        Serial.print(byteArray[i], HEX); Serial.print(" ");
       }
-    // }
+  }else {
+    Serial.println("I2C Buffer is smaller than number of bytes that need to be read");
   }
 
   Serial.print("\n");
@@ -173,7 +177,7 @@ void loop()
                             (uint32_t)(byteArray[28]) << 16 |
                             (uint32_t)(byteArray[27]) << 8 |
                             byteArray[26]);
-  convertdata(&data, &fData);
-  printMCP39F521Data(&fData);
+  // convertdata(&data, &fData);
+  // printMCP39F521Data(&fData);
   delay(1000);
 }
