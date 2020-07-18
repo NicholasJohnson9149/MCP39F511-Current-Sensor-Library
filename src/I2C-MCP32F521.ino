@@ -56,7 +56,7 @@ void wireErrors(uint8_t i2c_bus_Status){
 int registerReadNBytes(int addressHigh, int addressLow, int numBytesToRead, uint8_t *byteArray, int byteArraySize)
 {
   #define I2C_ADDRESS 0x74
-  uint8_t i2c_bus_Status = 0;
+  //uint8_t i2c_bus_Status = 0;
   uint8_t ReadDataBuf[8];
   int i;
   uint32_t checksumTotal = 0;
@@ -188,6 +188,5 @@ void loop()
   convertdata(&data, &fData);
   printMCP39F521Data(&fData);
   }
-  
   delay(1000);
 }

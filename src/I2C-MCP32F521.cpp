@@ -91,9 +91,9 @@ int registerReadNBytes(int addressHigh, int addressLow, int numBytesToRead, uint
   for(i= 0; i < 8; i++) {
     Wire.write(ReadDataBuf[i]);
   }
-  i2c_bus_Status = Wire.endTransmission(true);
-  wireErrors(i2c_bus_Status);
-  delay(50);
+  Wire.endTransmission(true);
+  //wireErrors(i2c_bus_Status);
+  delay(100);
   Wire.requestFrom(I2C_ADDRESS, (uint8_t)numBytesToRead + 3);
   int requestDataLength = Wire.available();
   if (requestDataLength==(numBytesToRead + 3)) {
@@ -165,7 +165,9 @@ void loop()
   MCP39F521_FormattedData fData;
   int retval = 0;
   uint8_t byteArray[35];
+
   retval = registerReadNBytes(0x00, 0x02, 28, byteArray, 35);
+
   if (retval != 0) {
       Serial.print("retval = "); Serial.println(retval);
   } else {
@@ -198,34 +200,3 @@ void loop()
   }
   delay(1000);
 }
-
-  // aucWriteDataBuf[0] = 0xA5; // Header
-  // aucWriteDataBuf[1] = 0x08; // Num bytes
-  // aucWriteDataBuf[2] = 0x41; // Command - set address pointer
-  // aucWriteDataBuf[3] = addressHigh;
-  // aucWriteDataBuf[4] = addressLow;
-  // aucWriteDataBuf[5] = 0x4e; // Command - read register, N bytes
-  // aucWriteDataBuf[6] = numBytesToRead;
-  // aucWriteDataBuf[7] = 0; // Checksum - computed below
-  // for(i=0; i<7;i++) {
-  //   checksumTotal += aucWriteDataBuf[i];
-  // }
-  // aucWriteDataBuf[7] = checksumTotal % 256;
-  // Wire.beginTransmission(0x74);
-  // for(i=0; i< 8; i++) {
-  //   Wire.write(aucWriteDataBuf[i]);
-  // }
-  // Wire.endTransmission();
-  // delay(50);
-  // // Read the specified length of data - numBytesToRead + 3 bytes
-  // Wire.requestFrom(0x74, (uint8_t)(numBytesToRead + 3));
-  // int requestDataLength = Wire.available();
-  // if (requestDataLength==(numBytesToRead + 3)) {
-  //   for (i = 0; i < numBytesToRead + 3 ; i++) {
-  //     byteArray[i] = Wire.read();
-  //     Serial.print(byteArray[i], HEX); Serial.print(" ");
-  //   }
-  //   Wire.endTransmission();
-  //   Serial.print("\n");
-  //   // Check header and checksum
-  //   // return checkHeaderAndChecksum(numBytesToRead, byteArray, byteArraySize);    
