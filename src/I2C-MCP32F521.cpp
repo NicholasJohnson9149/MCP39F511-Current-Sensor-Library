@@ -2,7 +2,6 @@
 //       THIS IS A GENERATED FILE - DO NOT EDIT       //
 /******************************************************/
 
-#include "Particle.h"
 #line 1 "/Users/nicholas/Documents/Particle/I2C-MCP32F521/src/I2C-MCP32F521.ino"
 // /*
 //  * Project I2C-MCP32F521
@@ -10,14 +9,15 @@
 //  * Author: Nicholas 
 //  * Date: July 16th 2020 
 //  */
-
+#include "application.h"
 #include "Wire.h"
-#include "particle.h"
+//#include "particle.h"
 #include <math.h>
 #include <string.h>
 #include <stdint.h>
 
 void wireErrors(uint8_t i2c_bus_Status);
+int registerReadNBytes(int addressHigh, int addressLow, int numBytesToRead, uint8_t *byteArray, int byteArraySize);
 void setup();
 void loop();
 #line 14 "/Users/nicholas/Documents/Particle/I2C-MCP32F521/src/I2C-MCP32F521.ino"
@@ -63,6 +63,50 @@ void wireErrors(uint8_t i2c_bus_Status){
   }
 }
 
+int registerReadNBytes(int addressHigh, int addressLow, int numBytesToRead, uint8_t *byteArray, int byteArraySize)
+{
+  #define I2C_ADDRESS 0x74
+  uint8_t i2c_bus_Status = 0;
+  uint8_t ReadDataBuf[8];
+  int i;
+  uint32_t checksumTotal = 0;
+  if (byteArraySize < numBytesToRead + 3) {
+    return 3;
+  }
+
+  ReadDataBuf[0] = 0xA5; // Header
+  ReadDataBuf[1] = 0x08; // Num bytes
+  ReadDataBuf[2] = 0x41; // Command - set address pointer
+  ReadDataBuf[3] = 0x00;
+  ReadDataBuf[4] = 0x02;
+  ReadDataBuf[5] = 0x4E; // Command - read register, N bytes
+  ReadDataBuf[6] = 0x20; 
+  ReadDataBuf[7] = 0; // Checksum 0x05E - computed below
+  for(i = 0; i < 7; i++) {
+    checksumTotal += ReadDataBuf[i];
+  }
+  ReadDataBuf[7] = checksumTotal % 256; // 0x5E = 94 
+  Serial.print("Checksum = "); Serial.println(ReadDataBuf[7], HEX);
+  Wire.beginTransmission(I2C_ADDRESS);
+  for(i= 0; i < 8; i++) {
+    Wire.write(ReadDataBuf[i]);
+  }
+  i2c_bus_Status = Wire.endTransmission(true);
+  wireErrors(i2c_bus_Status);
+  delay(50);
+  Wire.requestFrom(I2C_ADDRESS, (uint8_t)numBytesToRead + 3);
+  int requestDataLength = Wire.available();
+  if (requestDataLength==(numBytesToRead + 3)) {
+      for (i = 0; i <= requestDataLength ; i++) {
+        byteArray[i] = Wire.read();
+        Serial.print(byteArray[i], HEX); Serial.print(" ");
+      }
+    Serial.print("\n");
+  } else {
+    return 5; 
+  }
+  return 0;
+}
 void convertdata(MCP39F521_Data *data, MCP39F521_FormattedData *fData)
 {
   fData->voltageRMS = data->voltageRMS/10.0f;
@@ -98,13 +142,13 @@ void printMCP39F521Data(MCP39F521_FormattedData *data)
 }
 
 constexpr size_t I2C_BUFFER_SIZE = 35;
-uint8_t I2C_ADDRESS = 0x74;
+//uint8_t I2C_ADDRESS = 0x74;
 uint8_t numBytesToRead = 28;
 uint8_t ReadDataBuf[8];
-uint8_t byteArray[32];
+//uint8_t byteArray[32];
 uint64_t somedata = 0;
 uint32_t checksumTotal = 0;
-uint8_t i2c_bus_Status = 0;
+// uint8_t i2c_bus_Status = 0;
 int i;
 
 void setup() {
@@ -119,41 +163,13 @@ void loop()
 { 
   MCP39F521_Data data;
   MCP39F521_FormattedData fData;
-
-  ReadDataBuf[0] = 0xA5; // Header
-  ReadDataBuf[1] = 0x08; // Num bytes
-  ReadDataBuf[2] = 0x41; // Command - set address pointer
-  ReadDataBuf[3] = 0x00;
-  ReadDataBuf[4] = 0x02;
-  ReadDataBuf[5] = 0x4E; // Command - read register, N bytes
-  ReadDataBuf[6] = 0x20; 
-  ReadDataBuf[7] = 0; // Checksum 0x05E - computed below
-  for(i = 0; i < 7; i++) {
-    checksumTotal += ReadDataBuf[i];
-  }
-  ReadDataBuf[7] = checksumTotal % 256; // 0x5E = 94 
-  Serial.print("Checksum = "); Serial.println(ReadDataBuf[7], HEX);
-  Wire.beginTransmission(I2C_ADDRESS);
-  for(i= 0; i < 8; i++) {
-    Wire.write(ReadDataBuf[i]);
-  }
-  i2c_bus_Status = Wire.endTransmission(true);
-  wireErrors(i2c_bus_Status);
-  delay(5);
-
-  //Wire.requestFrom(I2C_ADDRESS, (uint8_t)35); // request the bytes
-  size_t bytes_read = Wire.requestFrom(WireTransmission(I2C_ADDRESS).quantity(I2C_BUFFER_SIZE).timeout(100ms));
-  if ( bytes_read <= I2C_BUFFER_SIZE ) {
-    int requestDataLength = Wire.available();
-      for (i = 0; i <= requestDataLength ; i++) {
-        byteArray[i] = Wire.read();
-        Serial.print(byteArray[i], HEX); Serial.print(" ");
-      }
-  }else {
-    Serial.println("I2C Buffer is smaller than number of bytes that need to be read");
-  }
-
-  Serial.print("\n");
+  int retval = 0;
+  uint8_t byteArray[35];
+  retval = registerReadNBytes(0x00, 0x02, 28, byteArray, 35);
+  if (retval != 0) {
+      Serial.print("retval = "); Serial.println(retval);
+  } else {
+  /* System status */
   data.systemStatus = ((byteArray[3] << 8) | byteArray[2]);
   data.systemVersion = ((byteArray[5] << 8) | byteArray[4]);
   data.voltageRMS = ((byteArray[7] << 8) | byteArray[6]);
@@ -177,7 +193,39 @@ void loop()
                             (uint32_t)(byteArray[28]) << 16 |
                             (uint32_t)(byteArray[27]) << 8 |
                             byteArray[26]);
-  // convertdata(&data, &fData);
-  // printMCP39F521Data(&fData);
+  convertdata(&data, &fData);
+  printMCP39F521Data(&fData);
+  }
   delay(1000);
 }
+
+  // aucWriteDataBuf[0] = 0xA5; // Header
+  // aucWriteDataBuf[1] = 0x08; // Num bytes
+  // aucWriteDataBuf[2] = 0x41; // Command - set address pointer
+  // aucWriteDataBuf[3] = addressHigh;
+  // aucWriteDataBuf[4] = addressLow;
+  // aucWriteDataBuf[5] = 0x4e; // Command - read register, N bytes
+  // aucWriteDataBuf[6] = numBytesToRead;
+  // aucWriteDataBuf[7] = 0; // Checksum - computed below
+  // for(i=0; i<7;i++) {
+  //   checksumTotal += aucWriteDataBuf[i];
+  // }
+  // aucWriteDataBuf[7] = checksumTotal % 256;
+  // Wire.beginTransmission(0x74);
+  // for(i=0; i< 8; i++) {
+  //   Wire.write(aucWriteDataBuf[i]);
+  // }
+  // Wire.endTransmission();
+  // delay(50);
+  // // Read the specified length of data - numBytesToRead + 3 bytes
+  // Wire.requestFrom(0x74, (uint8_t)(numBytesToRead + 3));
+  // int requestDataLength = Wire.available();
+  // if (requestDataLength==(numBytesToRead + 3)) {
+  //   for (i = 0; i < numBytesToRead + 3 ; i++) {
+  //     byteArray[i] = Wire.read();
+  //     Serial.print(byteArray[i], HEX); Serial.print(" ");
+  //   }
+  //   Wire.endTransmission();
+  //   Serial.print("\n");
+  //   // Check header and checksum
+  //   // return checkHeaderAndChecksum(numBytesToRead, byteArray, byteArraySize);    
