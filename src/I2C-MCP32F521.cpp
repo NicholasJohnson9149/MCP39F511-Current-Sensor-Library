@@ -56,48 +56,52 @@ typedef struct MCP39F521_FormattedData {
 
 int readMCP32f521(int addressHigh, int addressLow, int numBytesToRead, uint8_t *byteArray, int byteArraySize)
 {
-  constexpr size_t I2C_BUFFER_SIZE = 32;
   uint8_t I2C_ADDRESS = 0x74;
+  uint8_t aucWriteDataBuf[8];
   uint32_t checksumTotal = 0;
-  uint8_t i2c_bus_Status = 0;
-  uint8_t ReadDataBuf[8];
   int i;
-  ReadDataBuf[0] = 0xA5; // Header
-  ReadDataBuf[1] = 0x08; // Num bytes
-  ReadDataBuf[2] = 0x41; // Command - set address pointer
-  ReadDataBuf[3] = addressHigh;
-  ReadDataBuf[4] = addressLow;
-  ReadDataBuf[5] = 0x4E; // Command - read register, N bytes
-  ReadDataBuf[6] = 0x20; 
-  ReadDataBuf[7] = 0x5e; // Checksum 0x05E - computed below
-  for(i = 0; i < 7; i++) {
-    checksumTotal += ReadDataBuf[i];
+  if (byteArraySize < numBytesToRead + 3) {
+    return 2;
   }
-  ReadDataBuf[7] = checksumTotal % 256; // 0x5E = 94 
-  Serial.print("Checksum = "); Serial.println(ReadDataBuf[7]);
-  Wire.beginTransmission(I2C_ADDRESS);
-  for(i= 0; i < 8; i++) {
-    Wire.write(ReadDataBuf[i]);
-  }
-  i2c_bus_Status = Wire.endTransmission(true);
-  wireErrors(i2c_bus_Status);
-  delay(5);
 
-  Wire.requestFrom(I2C_ADDRESS, (uint8_t)32); // request the bytes
-  size_t bytes_read = Wire.requestFrom(I2C_ADDRESS, I2C_BUFFER_SIZE);
-  //uint8_t baseline[I2C_BUFFER_SIZE];
-  if ( bytes_read == I2C_BUFFER_SIZE ) {
-    int requestDataLength = Wire.available();
-    if (requestDataLength==(numBytesToRead + 3)) {
-      for (i = 0; i < requestDataLength ; i++) {
-        byteArray[requestDataLength - i] = Wire.read();
-        Serial.print(byteArray[requestDataLength - i], HEX); Serial.print(" ");
-      }
-    }else {
+  aucWriteDataBuf[0] = 0xa5; // Header
+  aucWriteDataBuf[1] = 0x08; // Num bytes
+  aucWriteDataBuf[2] = 0x41; // Command - set address pointer
+  aucWriteDataBuf[3] = addressHigh;
+  aucWriteDataBuf[4] = addressLow;
+  aucWriteDataBuf[5] = 0x4E; // Command - read register, N bytes
+  aucWriteDataBuf[6] = numBytesToRead;
+  aucWriteDataBuf[7] = 0; // Checksum - computed below
+
+  for(i=0; i<7;i++) {
+    checksumTotal += aucWriteDataBuf[i];
+  }
+
+  aucWriteDataBuf[7] = checksumTotal % 256;
+  Wire.beginTransmission(I2C_ADDRESS);
+  for(i=0; i< 8; i++) {
+    Wire.write(aucWriteDataBuf[i]);
+  }
+  Wire.endTransmission();  
+
+  Wire.requestFrom(I2C_ADDRESS, (uint8_t)(numBytesToRead + 3));
+  int requestDataLength = Wire.available();
+  if (requestDataLength==(numBytesToRead + 3)) 
+  {
+    for (i = 0; i < numBytesToRead + 3 ; i++) 
+    {
+      byteArray[i] = Wire.read();
+      Serial.print(byteArray[i], HEX); Serial.print(" ");
+    }
+    Serial.print("\n");
+    // Check header and checksum
+    return 3; //checkHeaderAndChecksum(numBytesToRead, byteArray, byteArraySize);      
+    
+  } else {
     // Unexpected. Handle error  
     return 5; 
   }
-  }
+
   return 0;
 }
 
@@ -160,7 +164,34 @@ int tinkerDigitalWrite(String command)
     else return -3;
 }
 
-void convertdata(MCP39F521_Data *data, MCP39F521_FormattedData *fData)
+void shortData(MCP39F521_Data *data, uint8_t *byteArray)
+{
+  data->systemStatus = ((byteArray[3] << 8) | byteArray[2]);
+  data->systemVersion = ((byteArray[5] << 8) | byteArray[4]);
+  data->voltageRMS = ((byteArray[7] << 8) | byteArray[6]);
+  data->lineFrequency = ((byteArray[9] << 8) | byteArray[8]);
+  data->analogInputVoltage = ((byteArray[11] << 8) | byteArray[10]);
+  data->powerFactor = (((signed char)byteArray[13] << 8) +
+                          (unsigned char)byteArray[12]);
+  data->currentRMS =      ((uint32_t)(byteArray[17]) << 24 |
+                            (uint32_t)(byteArray[16]) << 16 |
+                            (uint32_t)(byteArray[15]) << 8 |
+                            byteArray[14]);
+  data->activePower =     ((uint32_t)(byteArray[21]) << 24 |
+                            (uint32_t)(byteArray[20]) << 16 |
+                            (uint32_t)(byteArray[19]) << 8 |
+                            byteArray[18]);
+  data->reactivePower =   ((uint32_t)(byteArray[25]) << 24 |
+                            (uint32_t)(byteArray[24]) << 16 |
+                            (uint32_t)(byteArray[23]) << 8 |
+                            byteArray[22]);
+  data->apparentPower =   ((uint32_t)(byteArray[29]) << 24 |
+                            (uint32_t)(byteArray[28]) << 16 |
+                            (uint32_t)(byteArray[27]) << 8 |
+                            byteArray[26]);
+}
+
+void convertData(MCP39F521_Data *data, MCP39F521_FormattedData *fData)
 {
   fData->voltageRMS = data->voltageRMS/10.0f;
   fData->currentRMS = data->currentRMS/10000.0f;
@@ -184,6 +215,8 @@ void convertdata(MCP39F521_Data *data, MCP39F521_FormattedData *fData)
 
 void printMCP39F521Data(MCP39F521_FormattedData *data)
 {
+  Serial.print(F("systemStatus = ")); Serial.println(data->systemStatus, 4);
+  Serial.print(F("systemVersion = ")); Serial.println(data->systemVersion, 4);
   Serial.print(F("Voltage = ")); Serial.println(data->voltageRMS, 4);
   Serial.print(F("Current = ")); Serial.println(data->currentRMS, 4);
   Serial.print(F("Line Frequency = ")); Serial.println(data->lineFrequency, 4);
@@ -229,33 +262,16 @@ void loop()
   MCP39F521_Data data;
   MCP39F521_FormattedData fData;
   uint8_t byteArray[35];
+
   int reVal = readMCP32f521(0x00, 0x02, 28, byteArray, 35);
   Serial.print("reVal:"); Serial.println(reVal); 
-  data.systemStatus = ((byteArray[3] << 8) | byteArray[2]);
-  data.systemVersion = ((byteArray[5] << 8) | byteArray[4]);
-  data.voltageRMS = ((byteArray[7] << 8) | byteArray[6]);
-  data.lineFrequency = ((byteArray[9] << 8) | byteArray[8]);
-  data.analogInputVoltage = ((byteArray[11] << 8) | byteArray[10]);
-  data.powerFactor = (((signed char)byteArray[13] << 8) +
-                          (unsigned char)byteArray[12]);
-  data.currentRMS =      ((uint32_t)(byteArray[17]) << 24 |
-                            (uint32_t)(byteArray[16]) << 16 |
-                            (uint32_t)(byteArray[15]) << 8 |
-                            byteArray[14]);
-  data.activePower =     ((uint32_t)(byteArray[21]) << 24 |
-                            (uint32_t)(byteArray[20]) << 16 |
-                            (uint32_t)(byteArray[19]) << 8 |
-                            byteArray[18]);
-  data.reactivePower =   ((uint32_t)(byteArray[25]) << 24 |
-                            (uint32_t)(byteArray[24]) << 16 |
-                            (uint32_t)(byteArray[23]) << 8 |
-                            byteArray[22]);
-  data.apparentPower =   ((uint32_t)(byteArray[29]) << 24 |
-                            (uint32_t)(byteArray[28]) << 16 |
-                            (uint32_t)(byteArray[27]) << 8 |
-                            byteArray[26]);
-  convertdata(&data, &fData);
-  printMCP39F521Data(&fData);
-  //LM75A_TEMP_READING();
+  if (reVal == 0){
+    shortData(&data, byteArray);
+    convertData(&data, &fData);
+    printMCP39F521Data(&fData);
+  } else {
+     Serial.println("I2C MCP39F521 Error!");
+  }
+  LM75A_TEMP_READING();
   delay(1000);
 }
