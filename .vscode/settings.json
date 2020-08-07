@@ -55,5 +55,5 @@
     },
     "particle.targetPlatform": "argon",
     "particle.firmwareVersion": "1.5.2",
-    "particle.targetDevice": "EV-OUTLET-004"
+    "particle.targetDevice": "AOR-001"
 }

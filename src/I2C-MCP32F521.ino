@@ -6,10 +6,18 @@
 //  */
 #include "application.h"
 #include "Wire.h"
-//#include "particle.h"
 #include <math.h>
 #include <string.h>
 #include <stdint.h>
+
+int tinkerDigitalWrite(String command);
+
+constexpr size_t I2C_BUFFER_SIZE = 35;
+  uint8_t numBytesToRead = 28;
+  uint8_t ReadDataBuf[8];
+  uint64_t somedata = 0;
+  uint32_t checksumTotal = 0;
+int i;
 
 typedef struct MCP39F521_Data {
 	uint16_t systemStatus;
@@ -39,36 +47,35 @@ typedef struct MCP39F521_FormattedData {
 
 void wireErrors(uint8_t i2c_bus_Status){
   if(i2c_bus_Status == 0){
-    Serial.print("I2C bus Status Success = "); Serial.println(i2c_bus_Status);
+    Serial.print("I2C bus Status Success::"); Serial.println(i2c_bus_Status);
   }else if(i2c_bus_Status == 1){
-    Serial.print("Busy timeout upon entering endTransmission() = "); Serial.println(i2c_bus_Status);
+    Serial.print("Busy timeout upon entering endTransmission()::"); Serial.println(i2c_bus_Status);
   }else if(i2c_bus_Status == 2){
-    Serial.print("Start bit generation timeout = "); Serial.println(i2c_bus_Status);
+    Serial.print("Start bit generation timeout::"); Serial.println(i2c_bus_Status);
   }else if(i2c_bus_Status == 3){
-    Serial.print("end of address transmission timeout = "); Serial.println(i2c_bus_Status);
+    Serial.print("end of address transmission timeout::"); Serial.println(i2c_bus_Status);
   }else if(i2c_bus_Status == 4){
-    Serial.print("Data byte transfer timeout = "); Serial.println(i2c_bus_Status);
+    Serial.print("Data byte transfer timeout::"); Serial.println(i2c_bus_Status);
   }else if(i2c_bus_Status == 5){
-    Serial.print("Data byte transfer succeeded, busy timeout immediately after = "); Serial.println(i2c_bus_Status);
+    Serial.print("Data byte transfer succeeded, busy timeout immediately after::"); Serial.println(i2c_bus_Status);
   }
 }
 
 int registerReadNBytes(int addressHigh, int addressLow, int numBytesToRead, uint8_t *byteArray, int byteArraySize)
 {
   #define I2C_ADDRESS 0x74
-  //uint8_t i2c_bus_Status = 0;
+  uint8_t i2c_bus_Status = 0;
   uint8_t ReadDataBuf[8];
   int i;
   uint32_t checksumTotal = 0;
   if (byteArraySize < numBytesToRead + 3) {
     return 3;
   }
-
   ReadDataBuf[0] = 0xA5; // Header
   ReadDataBuf[1] = 0x08; // Num bytes
   ReadDataBuf[2] = 0x41; // Command - set address pointer
-  ReadDataBuf[3] = 0x00;
-  ReadDataBuf[4] = 0x02;
+  ReadDataBuf[3] = addressHigh;
+  ReadDataBuf[4] = addressLow;
   ReadDataBuf[5] = 0x4E; // Command - read register, N bytes
   ReadDataBuf[6] = 0x20; 
   ReadDataBuf[7] = 0; // Checksum 0x05E - computed below
@@ -81,13 +88,13 @@ int registerReadNBytes(int addressHigh, int addressLow, int numBytesToRead, uint
   for(i= 0; i < 8; i++) {
     Wire.write(ReadDataBuf[i]);
   }
-  Wire.endTransmission(true);
-  //wireErrors(i2c_bus_Status);
-  delay(100);
-  Wire.requestFrom(I2C_ADDRESS, (uint8_t)numBytesToRead + 3);
+  i2c_bus_Status = Wire.endTransmission(true);
+  wireErrors(i2c_bus_Status);
+  delay(50);
+  Wire.requestFrom(I2C_ADDRESS, 31);
   int requestDataLength = Wire.available();
   if (requestDataLength==(numBytesToRead + 3)) {
-      for (i = 0; i <= requestDataLength ; i++) {
+      for (i = 0; i <= numBytesToRead + 3 ; i++) {
         byteArray[i] = Wire.read();
         Serial.print(byteArray[i], HEX); Serial.print(" ");
       }
@@ -97,16 +104,15 @@ int registerReadNBytes(int addressHigh, int addressLow, int numBytesToRead, uint
   }
   return 0;
 }
+
 void convertdata(MCP39F521_Data *data, MCP39F521_FormattedData *fData)
 {
   fData->voltageRMS = data->voltageRMS/10.0f;
   fData->currentRMS = data->currentRMS/10000.0f;
   fData->lineFrequency = data->lineFrequency/1000.0f;
   // Analog Input Voltage represents ADC data for 10 bit ADC
-  // By trial, it's been found that it has a ref voltage of 3.3v
-  // So the register value/1023 * 3.3v will give the analog input voltage in volts.
+  // The register value/1023 * 3.3v will give the analog input voltage in volts.
   // analogInputVoltage = RegData/1023.0 * 3.3;
-  // Do this on the application side?  
   fData->analogInputVoltage = data->analogInputVoltage/1023.0f*3.3;
   float f;
   unsigned char ch;
@@ -131,20 +137,61 @@ void printMCP39F521Data(MCP39F521_FormattedData *data)
   Serial.print(F("Apparent Power = ")); Serial.println(data->apparentPower, 4);
 }
 
-constexpr size_t I2C_BUFFER_SIZE = 35;
-//uint8_t I2C_ADDRESS = 0x74;
-uint8_t numBytesToRead = 28;
-uint8_t ReadDataBuf[8];
-//uint8_t byteArray[32];
-uint64_t somedata = 0;
-uint32_t checksumTotal = 0;
-// uint8_t i2c_bus_Status = 0;
-int i;
+/*******************************************************************************
+ * Function Name  : tinkerDigitalWrite
+ * Description    : Sets the specified pin HIGH or LOW
+ * Input          : Pin and value
+ * Output         : None.
+ * Return         : 1 on success and a negative number on failure
+ *******************************************************************************/
+int tinkerDigitalWrite(String command)
+{
+    bool value = 0;
+    //convert ASCII to integer
+    int pinNumber = command.charAt(1) - '0';
+    //Sanity check to see if the pin numbers are within limits
+    if (pinNumber < 0 || pinNumber > 7) return -1;
+
+    if(command.substring(3,7) == "HIGH") value = 1;
+    else if(command.substring(3,6) == "LOW") value = 0;
+    else return -2;
+
+    if(command.startsWith("D"))
+    {
+        pinMode(pinNumber, OUTPUT);
+        digitalWrite(pinNumber, value);
+        return 1;
+    }
+    else if(command.startsWith("A"))
+    {
+        pinMode(pinNumber+10, OUTPUT);
+        digitalWrite(pinNumber+10, value);
+        return 1;
+    }
+#if Wiring_Cellular
+    else if(command.startsWith("B"))
+    {
+        if (pinNumber > 5) return -4;
+        pinMode(pinNumber+24, OUTPUT);
+        digitalWrite(pinNumber+24, value);
+        return 1;
+    }
+    else if(command.startsWith("C"))
+    {
+        if (pinNumber > 5) return -5;
+        pinMode(pinNumber+30, OUTPUT);
+        digitalWrite(pinNumber+30, value);
+        return 1;
+    }
+#endif
+    else return -3;
+}
 
 void setup() {
-    WiFi.off();
+    //WiFi.off();
     Serial.begin(115200);
-    Wire.setSpeed(CLOCK_SPEED_100KHZ);
+    Particle.function("digitalwrite", tinkerDigitalWrite);
+    //Wire.setSpeed(CLOCK_SPEED_400KHZ);
     //Wire.stretchClock(true);
     Wire.begin();
 }
