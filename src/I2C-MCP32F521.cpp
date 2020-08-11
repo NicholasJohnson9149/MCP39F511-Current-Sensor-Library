@@ -70,7 +70,6 @@ int readMCP32f521(int addressHigh, int addressLow, int numBytesToRead, uint8_t *
 {
   const uint8_t _i2c_device_address = 0x74;
   uint8_t checksum = 0; 
-  uint32_t rawData[35];
   uint8_t writeData[8]; //= {0xA5, 0x08, 0x41, addressHigh, addressLow, 0x4E, numBytesToRead, 0}
 
   writeData[0] = 0xA5;
@@ -93,16 +92,18 @@ int readMCP32f521(int addressHigh, int addressLow, int numBytesToRead, uint8_t *
   }
   if(Wire.endTransmission()) {return 2;} // Transmission error
   Serial.printlnf("Bytes Written: %d", bytesWritten);
-  // delay(10);
-  // if (Wire.requestFrom(_i2c_device_address, 32)) {
-  //     int bytesRead = Wire.readBytes((char*)byteArray, numBytesToRead + 3);
-  //     for(int i=0; i < numBytesToRead + 3 ; i++ ){
-  //         Serial.print(byteArray[i], HEX); 
-  //     }
-  //     Serial.print("\n");
-  // } else {
-  //   return 5;
-  // }
+  delay(2);
+  if (Wire.requestFrom(_i2c_device_address, 35)) {
+      int bytesRead = Wire.readBytes((char*)byteArray, 35);
+      for(int i=0; i < 35 ; i++ ){
+          Serial.print(byteArray[i], HEX); 
+      }
+       Serial.print("\n");
+       Serial.printlnf("bytesRead: %d", bytesRead);
+  } else {
+    return 5;
+  }
+  
   return 0;
 }
 
@@ -304,49 +305,3 @@ void loop()
   //LM75A_TEMP_READING();
   delay(1000);
 }
-
-// uint8_t I2C_ADDRESS = 0x74;
-// uint8_t aucWriteDataBuf[8];
-// uint32_t checksumTotal = 0;
-// int i;
-// if (byteArraySize < numBytesToRead + 3) {
-//   return 2;
-// }
-
-// aucWriteDataBuf[0] = 0xa5; // Header
-// aucWriteDataBuf[1] = 0x08; // Num bytes
-// aucWriteDataBuf[2] = 0x41; // Command - set address pointer
-// aucWriteDataBuf[3] = addressHigh;
-// aucWriteDataBuf[4] = addressLow;checksum
-// aucWriteDataBuf[5] = 0x4E; // Command - read register, N bytes
-// aucWriteDataBuf[6] = numBytesToRead;
-// aucWriteDataBuf[7] = 0; // Checksum - computed below
-
-// for(i=0; i<7;i++) {
-//   checksumTotal += aucWriteDataBuf[i];
-// }
-
-// aucWriteDataBuf[7] = checksumTotal % 256;
-// Wire.beginTransmission(I2C_ADDRESS);
-// for(i=0; i< 8; i++) {
-//   Wire.write(aucWriteDataBuf[i]);
-// }
-// Wire.endTransmission();  
-
-// Wire.requestFrom(I2C_ADDRESS, (uint8_t)(numBytesToRead + 3));
-// int requestDataLength = Wire.available();
-// if (requestDataLength==(numBytesToRead + 3)) 
-// {
-//   for (i = 0; i < numBytesToRead + 3 ; i++) 
-//   {
-//     byteArray[i] = Wire.read();
-//     Serial.print(byteArray[i], HEX); Serial.print(" ");
-//   }
-//   Serial.print("\n");
-//   // Check header and checksum
-//   return 3; //checkHeaderAndChecksum(numBytesToRead, byteArray, byteArraySize);      
-  
-// } else {
-//   // Unexpected. Handle error  
-//   return 5; 
-// }
