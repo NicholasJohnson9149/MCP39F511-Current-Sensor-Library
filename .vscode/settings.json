@@ -51,9 +51,11 @@
         "sstream": "cpp",
         "stdexcept": "cpp",
         "streambuf": "cpp",
-        "typeinfo": "cpp"
+        "typeinfo": "cpp",
+        "__locale": "cpp",
+        "__string": "cpp"
     },
     "particle.targetPlatform": "argon",
-    "particle.firmwareVersion": "1.5.0",
+    "particle.firmwareVersion": "1.4.4",
     "particle.targetDevice": "AOR-001"
 }

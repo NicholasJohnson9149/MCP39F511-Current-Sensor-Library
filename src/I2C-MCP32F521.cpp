@@ -13,6 +13,7 @@
 
 #include "Wire.h"
 #include "particle.h"
+#include "neopixel.h"
 #include <LM75A.h>
 
 int readMCP32f521(int addressHigh, int addressLow, int numBytesToRead, uint8_t *byteArray, int byteArraySize);
@@ -20,10 +21,21 @@ void wireErrors(uint8_t i2c_bus_Status);
 void LM75A_TEMP_READING();
 void setup();
 void loop();
-#line 12 "/Users/nicholas/Documents/Particle/I2C-MCP32F521/src/I2C-MCP32F521.ino"
-SYSTEM_MODE(SEMI_AUTOMATIC)
+#line 13 "/Users/nicholas/Documents/Particle/I2C-MCP32F521/src/I2C-MCP32F521.ino"
+SYSTEM_MODE(MANUAL);
+// SYSTEM_MODE(SEMI_AUTOMATIC)
+
+#define PIXEL_PIN D2
+#define PIXEL_COUNT 12
+#define PIXEL_TYPE SK6812RGBW
+#define BRIGHTNESS 50 // 0 - 255
 
 int tinkerDigitalWrite(String command);
+void colorWipe(uint32_t c, uint8_t wait);
+uint32_t Wheel(byte WheelPos);
+
+// Create NeoPixel instance
+Adafruit_NeoPixel strip(PIXEL_COUNT, PIXEL_PIN, PIXEL_TYPE);
 
 // Create I2C LM75A instance
 LM75A lm75a_sensor(false, false, false); //A1, A2, A3 LM75A pin state for I2C address 
@@ -56,52 +68,41 @@ typedef struct MCP39F521_FormattedData {
 
 int readMCP32f521(int addressHigh, int addressLow, int numBytesToRead, uint8_t *byteArray, int byteArraySize)
 {
-  uint8_t I2C_ADDRESS = 0x74;
-  uint8_t aucWriteDataBuf[8];
-  uint32_t checksumTotal = 0;
-  int i;
-  if (byteArraySize < numBytesToRead + 3) {
-    return 2;
+  const uint8_t _i2c_device_address = 0x74;
+  uint8_t checksum = 0; 
+  uint32_t rawData[35];
+  uint8_t writeData[8]; //= {0xA5, 0x08, 0x41, addressHigh, addressLow, 0x4E, numBytesToRead, 0}
+
+  writeData[0] = 0xA5;
+  writeData[1] = 0x08;
+  writeData[2] = 0x41;
+  writeData[3] = addressHigh;
+  writeData[4] = addressLow;
+  writeData[5] = 0x4E;
+  writeData[6] = 0x20;
+  writeData[7] = 0;
+  for(int i =0; i<7; i++){
+    checksum += writeData[i];
   }
+  writeData[7] = checksum % 256;
 
-  aucWriteDataBuf[0] = 0xa5; // Header
-  aucWriteDataBuf[1] = 0x08; // Num bytes
-  aucWriteDataBuf[2] = 0x41; // Command - set address pointer
-  aucWriteDataBuf[3] = addressHigh;
-  aucWriteDataBuf[4] = addressLow;
-  aucWriteDataBuf[5] = 0x4E; // Command - read register, N bytes
-  aucWriteDataBuf[6] = numBytesToRead;
-  aucWriteDataBuf[7] = 0; // Checksum - computed below
-
-  for(i=0; i<7;i++) {
-    checksumTotal += aucWriteDataBuf[i];
+  Wire.beginTransmission(_i2c_device_address);
+  int bytesWritten = 0;
+  for(int i=0; i<8; i++) {
+    bytesWritten += Wire.write(writeData[i]);
   }
-
-  aucWriteDataBuf[7] = checksumTotal % 256;
-  Wire.beginTransmission(I2C_ADDRESS);
-  for(i=0; i< 8; i++) {
-    Wire.write(aucWriteDataBuf[i]);
-  }
-  Wire.endTransmission();  
-
-  Wire.requestFrom(I2C_ADDRESS, (uint8_t)(numBytesToRead + 3));
-  int requestDataLength = Wire.available();
-  if (requestDataLength==(numBytesToRead + 3)) 
-  {
-    for (i = 0; i < numBytesToRead + 3 ; i++) 
-    {
-      byteArray[i] = Wire.read();
-      Serial.print(byteArray[i], HEX); Serial.print(" ");
-    }
-    Serial.print("\n");
-    // Check header and checksum
-    return 3; //checkHeaderAndChecksum(numBytesToRead, byteArray, byteArraySize);      
-    
-  } else {
-    // Unexpected. Handle error  
-    return 5; 
-  }
-
+  if(Wire.endTransmission()) {return 2;} // Transmission error
+  Serial.printlnf("Bytes Written: %d", bytesWritten);
+  // delay(10);
+  // if (Wire.requestFrom(_i2c_device_address, 32)) {
+  //     int bytesRead = Wire.readBytes((char*)byteArray, numBytesToRead + 3);
+  //     for(int i=0; i < numBytesToRead + 3 ; i++ ){
+  //         Serial.print(byteArray[i], HEX); 
+  //     }
+  //     Serial.print("\n");
+  // } else {
+  //   return 5;
+  // }
   return 0;
 }
 
@@ -242,14 +243,37 @@ void LM75A_TEMP_READING()
   }
 }
 
+void colorWipe(uint32_t c, uint8_t wait) {
+  for(uint16_t i=0; i<strip.numPixels(); i++) {
+    strip.setPixelColor(i, c);
+    strip.show();
+    delay(wait);
+  }
+}
+
+// Input a value 0 to 255 to get a color value.
+// The colours are a transition r - g - b - back to r.
+uint32_t Wheel(byte WheelPos) {
+  if(WheelPos < 85) {
+   return strip.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
+  } else if(WheelPos < 170) {
+   WheelPos -= 85;
+   return strip.Color(255 - WheelPos * 3, 0, WheelPos * 3);
+  } else {
+   WheelPos -= 170;
+   return strip.Color(0, WheelPos * 3, 255 - WheelPos * 3);
+  }
+}
 
 void setup() {
   WiFi.off();
   Serial.begin(115200);
   pinMode(D7, OUTPUT);
   digitalWrite(D7, HIGH);
+  strip.begin();
+  strip.show();
+  strip.setBrightness(20);
   Wire.setSpeed(CLOCK_SPEED_100KHZ);
-  //Wire.stretchClock(true);
   Wire.begin();
   Particle.function("digitalwrite", tinkerDigitalWrite);
   if (Particle.connected() == false) {
@@ -259,19 +283,70 @@ void setup() {
 
 void loop() 
 { 
-  MCP39F521_Data data;
-  MCP39F521_FormattedData fData;
+  colorWipe(strip.Color(255, 255, 255), 50); // Cyan
+  // MCP39F521_Data data;
+  // MCP39F521_FormattedData fData;
   uint8_t byteArray[35];
-
+  for(int i=0; i < 35; i++){
+    byteArray[i] = 0x55;
+  }
   int reVal = readMCP32f521(0x00, 0x02, 28, byteArray, 35);
-  Serial.print("reVal:"); Serial.println(reVal); 
+  Serial.print("MCP_FUNC_RETUNE_VAL:"); Serial.println(reVal); 
   if (reVal == 0){
-    shortData(&data, byteArray);
-    convertData(&data, &fData);
-    printMCP39F521Data(&fData);
+    Serial.println("Data Avalible");
+    // shortData(&data, byteArray);
+    // convertData(&data, &fData);
+    // printMCP39F521Data(&fData);
   } else {
      Serial.println("I2C MCP39F521 Error!");
   }
-  LM75A_TEMP_READING();
+  Serial.println(" ");
+  //LM75A_TEMP_READING();
   delay(1000);
 }
+
+// uint8_t I2C_ADDRESS = 0x74;
+// uint8_t aucWriteDataBuf[8];
+// uint32_t checksumTotal = 0;
+// int i;
+// if (byteArraySize < numBytesToRead + 3) {
+//   return 2;
+// }
+
+// aucWriteDataBuf[0] = 0xa5; // Header
+// aucWriteDataBuf[1] = 0x08; // Num bytes
+// aucWriteDataBuf[2] = 0x41; // Command - set address pointer
+// aucWriteDataBuf[3] = addressHigh;
+// aucWriteDataBuf[4] = addressLow;checksum
+// aucWriteDataBuf[5] = 0x4E; // Command - read register, N bytes
+// aucWriteDataBuf[6] = numBytesToRead;
+// aucWriteDataBuf[7] = 0; // Checksum - computed below
+
+// for(i=0; i<7;i++) {
+//   checksumTotal += aucWriteDataBuf[i];
+// }
+
+// aucWriteDataBuf[7] = checksumTotal % 256;
+// Wire.beginTransmission(I2C_ADDRESS);
+// for(i=0; i< 8; i++) {
+//   Wire.write(aucWriteDataBuf[i]);
+// }
+// Wire.endTransmission();  
+
+// Wire.requestFrom(I2C_ADDRESS, (uint8_t)(numBytesToRead + 3));
+// int requestDataLength = Wire.available();
+// if (requestDataLength==(numBytesToRead + 3)) 
+// {
+//   for (i = 0; i < numBytesToRead + 3 ; i++) 
+//   {
+//     byteArray[i] = Wire.read();
+//     Serial.print(byteArray[i], HEX); Serial.print(" ");
+//   }
+//   Serial.print("\n");
+//   // Check header and checksum
+//   return 3; //checkHeaderAndChecksum(numBytesToRead, byteArray, byteArraySize);      
+  
+// } else {
+//   // Unexpected. Handle error  
+//   return 5; 
+// }
