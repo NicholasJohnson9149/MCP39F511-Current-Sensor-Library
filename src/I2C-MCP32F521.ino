@@ -81,8 +81,8 @@ int readMCP32f521(int addressHigh, int addressLow, int numBytesToRead, uint8_t *
   if(Wire.endTransmission()) {return 2;} // Transmission error
   Serial.printlnf("Bytes Written: %d", bytesWritten);
   delay(2);
-  if (Wire.requestFrom(_i2c_device_address, 35)) {
-      int bytesRead = Wire.readBytes((char*)byteArray, 35);
+  if (Wire.requestFrom(_i2c_device_address, 32)) {
+      int bytesRead = Wire.readBytes((char*)byteArray, 32);
       for(int i=0; i < 35 ; i++ ){
           Serial.print(byteArray[i], HEX); 
       }
