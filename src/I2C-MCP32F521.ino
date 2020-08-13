@@ -17,16 +17,45 @@ SYSTEM_MODE(MANUAL);
 #define PIXEL_COUNT 12
 #define PIXEL_TYPE SK6812RGBW
 #define BRIGHTNESS 50 // 0 - 255
-
+constexpr size_t I2C_BUFFER_SIZE = 32;
 int tinkerDigitalWrite(String command);
 void colorWipe(uint32_t c, uint8_t wait);
 uint32_t Wheel(byte WheelPos);
-
+uint8_t i2c_addr = 0x74;
 // Create NeoPixel instance
 Adafruit_NeoPixel strip(PIXEL_COUNT, PIXEL_PIN, PIXEL_TYPE);
 
 // Create I2C LM75A instance
 LM75A lm75a_sensor(false, false, false); //A1, A2, A3 LM75A pin state for I2C address 
+
+enum error_code {
+    SUCCESS = 0,
+    ERROR_INCORRECT_HEADER = 1,
+    ERROR_CHECKSUM_FAIL = 2,
+    ERROR_UNEXPECTED_RESPONSE = 3,
+    ERROR_INSUFFICIENT_ARRAY_SIZE = 4,
+    ERROR_CHECKSUM_MISMATCH = 5,
+    ERROR_SET_VALUE_MISMATCH = 6
+  };
+
+enum response_code {
+    RESPONSE_ACK = 0x06,
+    RESPONSE_NAK = 0x15, 
+    RESPONSE_CSFAIL = 0x51
+  };
+
+  enum command_code {
+    COMMAND_REGISTER_READ_N_BYTES = 0x4e,
+    COMMAND_REGISTER_WRITE_N_BYTES = 0x4d,
+    COMMAND_SET_ADDRESS_POINTER = 0x41,
+    COMMAND_SAVE_TO_FLASH = 0x53,
+    COMMAND_PAGE_READ_EEPROM = 0x42,
+    COMMAND_PAGE_WRITE_EEPROM = 0x50,
+    COMMAND_BULK_ERASE_EEPROM = 0x4f,
+    COMMAND_AUTO_CALIBRATE_GAIN = 0x5a,
+    COMMAND_AUTO_CALIBRATE_REACTIVE_GAIN = 0x7a,
+    COMMAND_AUTO_CALIBRATE_FREQUENCY = 0x76
+  };
 
 typedef struct MCP39F521_Data {
 	uint16_t systemStatus;
@@ -54,60 +83,95 @@ typedef struct MCP39F521_FormattedData {
 	float apparentPower;
 } MCP39F521_FormattedData;
 
+int checkHeader(int header)
+{
+  int error = SUCCESS;
+  if (header != RESPONSE_ACK) {
+    error = ERROR_INCORRECT_HEADER;
+    if (header == RESPONSE_CSFAIL) {
+      error = ERROR_CHECKSUM_FAIL;
+    }
+  }
+  return error;
+}
+
+int checkHeaderAndChecksum( int numBytesToRead, uint8_t *byteArray, int byteArraySize)
+{
+  int i;
+  uint16_t checksumTotal = 0;
+  
+  uint8_t header = byteArray[0];
+  //uint8_t dataLen = byteArray[1];
+  uint8_t checksum = byteArray[numBytesToRead + 3 - 1];
+  
+  for (i = 0; i < numBytesToRead + 3 - 1; i++) {
+    checksumTotal += byteArray[i];
+  }
+  uint8_t calculatedChecksum = checksumTotal % 256;
+  int error = SUCCESS;
+
+  error = checkHeader(header);
+  
+  if (calculatedChecksum != checksum) {
+    error = ERROR_CHECKSUM_MISMATCH;
+  }
+  
+  return error;
+}
+
 int readMCP32f521(int addressHigh, int addressLow, int numBytesToRead, uint8_t *byteArray, int byteArraySize)
 {
+  
   const uint8_t _i2c_device_address = 0x74;
   uint8_t checksum = 0; 
   uint8_t writeData[8]; //= {0xA5, 0x08, 0x41, addressHigh, addressLow, 0x4E, numBytesToRead, 0}
-
+  if (byteArraySize < numBytesToRead + 3) {
+    return ERROR_INSUFFICIENT_ARRAY_SIZE;
+  }
   writeData[0] = 0xA5;
   writeData[1] = 0x08;
   writeData[2] = 0x41;
-  writeData[3] = addressHigh;
-  writeData[4] = addressLow;
+  writeData[3] = 0x00; //addressHigh;
+  writeData[4] = 0x02; //addressLow;
   writeData[5] = 0x4E;
-  writeData[6] = 0x20;
+  writeData[6] = 0x20; //numBytesToRead;
   writeData[7] = 0;
   for(int i =0; i<7; i++){
     checksum += writeData[i];
   }
   writeData[7] = checksum % 256;
-
   Wire.beginTransmission(_i2c_device_address);
   int bytesWritten = 0;
   for(int i=0; i<8; i++) {
     bytesWritten += Wire.write(writeData[i]);
   }
-  if(Wire.endTransmission()) {return 2;} // Transmission error
-  Serial.printlnf("Bytes Written: %d", bytesWritten);
-  delay(2);
-  if (Wire.requestFrom(_i2c_device_address, 32)) {
-      int bytesRead = Wire.readBytes((char*)byteArray, 32);
-      for(int i=0; i < 35 ; i++ ){
-          Serial.print(byteArray[i], HEX); 
-      }
-       Serial.print("\n");
-       Serial.printlnf("bytesRead: %d", bytesRead);
-  } else {
-    return 5;
+  if(Wire.endTransmission(false)) {return 2;} // Transmission error
+  //delay(10);
+  Wire.requestFrom(WireTransmission(_i2c_device_address).quantity(numBytesToRead+3));//i2c_device_address, (numBytesToRead + 3));
+  int bytesAvailale = Wire.available();
+  int bytesRead = Wire.readBytes((char*)byteArray, numBytesToRead + 4); 
+  for(int i=0; i < numBytesToRead + 4 ; i++ ){
+      Serial.print(byteArray[i], HEX); 
   }
-  
+  Serial.print("\n");
+  Serial.printlnf("bytesAvailale: %d", bytesAvailale);
+  Serial.printlnf("bytesRead: %d", bytesRead);
   return 0;
 }
 
 void wireErrors(uint8_t i2c_bus_Status){
   if(i2c_bus_Status == 0){
-    Serial.print("I2C bus Status Success = "); Serial.println(i2c_bus_Status);
+    Serial.printlnf("I2C bus Status Success = %d", i2c_bus_Status);
   }else if(i2c_bus_Status == 1){
-    Serial.print("Busy timeout upon entering endTransmission() = "); Serial.println(i2c_bus_Status);
+    Serial.printlnf("Busy timeout upon entering endTransmission() = %d", i2c_bus_Status);
   }else if(i2c_bus_Status == 2){
-    Serial.print("Start bit generation timeout = "); Serial.println(i2c_bus_Status);
+    Serial.printlnf("Start bit generation timeout = %d", i2c_bus_Status);
   }else if(i2c_bus_Status == 3){
-    Serial.print("end of address transmission timeout = "); Serial.println(i2c_bus_Status);
+    Serial.printlnf("end of address transmission timeout = %d", i2c_bus_Status);
   }else if(i2c_bus_Status == 4){
-    Serial.print("Data byte transfer timeout = "); Serial.println(i2c_bus_Status);
+    Serial.printlnf("Data byte transfer timeout =  %d", i2c_bus_Status);
   }else if(i2c_bus_Status == 5){
-    Serial.print("Data byte transfer succeeded, busy timeout immediately after = "); Serial.println(i2c_bus_Status);
+    Serial.printlnf("Data byte transfer succeeded, busy timeout immediately after = %d", i2c_bus_Status);
   }
 }
 
@@ -205,16 +269,16 @@ void convertData(MCP39F521_Data *data, MCP39F521_FormattedData *fData)
 
 void printMCP39F521Data(MCP39F521_FormattedData *data)
 {
-  Serial.print(F("systemStatus = ")); Serial.println(data->systemStatus, 4);
-  Serial.print(F("systemVersion = ")); Serial.println(data->systemVersion, 4);
-  Serial.print(F("Voltage = ")); Serial.println(data->voltageRMS, 4);
-  Serial.print(F("Current = ")); Serial.println(data->currentRMS, 4);
-  Serial.print(F("Line Frequency = ")); Serial.println(data->lineFrequency, 4);
-  Serial.print("Analog Input Voltage = "); Serial.println(data->analogInputVoltage, 4);
-  Serial.print(F("Power Factor = ")); Serial.println(data->powerFactor, 4);
-  Serial.print(F("Active Power = ")); Serial.println(data->activePower, 4);
-  Serial.print(F("Reactive Power = ")); Serial.println(data->reactivePower, 4);
-  Serial.print(F("Apparent Power = ")); Serial.println(data->apparentPower, 4);
+  Serial.printlnf("systemStatus = %d", data->systemStatus, 4);
+  Serial.printlnf("systemVersion = %d", data->systemVersion, 4);
+  Serial.printlnf("Voltage = %d", data->voltageRMS, 4);
+  Serial.printlnf("Current = %d", data->currentRMS, 4);
+  Serial.printlnf("Line Frequency = %d", data->lineFrequency, 4);
+  Serial.printlnf("Analog Input Voltage = %d", data->analogInputVoltage, 4);
+  Serial.printlnf("Power Factor = %d", data->powerFactor, 4);
+  Serial.printlnf("Active Power = %d", data->activePower, 4);
+  Serial.printlnf("Reactive Power = %d", data->reactivePower, 4);
+  Serial.printlnf("Apparent Power = %d", data->apparentPower, 4);
 }
 
 void LM75A_TEMP_READING()
@@ -224,11 +288,7 @@ void LM75A_TEMP_READING()
   if (temperature_in_degrees == INVALID_LM75A_TEMPERATURE) {
     Serial.println("Error while getting temperature");
   } else {
-    Serial.print("Temperature: ");
-    Serial.print(temperature_in_degrees);
-    Serial.print(" degrees (");
-    Serial.print(LM75A::degreesToFahrenheit(temperature_in_degrees));
-    Serial.println(" fahrenheit)");
+    Serial.printlnf("LM75 Temperature in degrees = %d", temperature_in_degrees, " degrees (%d", LM75A::degreesToFahrenheit(temperature_in_degrees), " fahrenheit)");
   }
 }
 
@@ -257,39 +317,41 @@ uint32_t Wheel(byte WheelPos) {
 void setup() {
   WiFi.off();
   Serial.begin(115200);
-  pinMode(D7, OUTPUT);
-  digitalWrite(D7, HIGH);
-  strip.begin();
-  strip.show();
-  strip.setBrightness(20);
+  // pinMode(D7, OUTPUT);
+  // digitalWrite(D7, HIGH);
+  // strip.begin();
+  // strip.show();
+  // strip.setBrightness(20);
   Wire.setSpeed(CLOCK_SPEED_100KHZ);
   Wire.begin();
   Particle.function("digitalwrite", tinkerDigitalWrite);
-  if (Particle.connected() == false) {
-    Particle.connect();
-  }
+  // if (Particle.connected() == false) {
+  //   Particle.connect();
+  // }
 }
 
 void loop() 
 { 
-  colorWipe(strip.Color(255, 255, 255), 50); // Cyan
-  // MCP39F521_Data data;
-  // MCP39F521_FormattedData fData;
+  //colorWipe(strip.Color(255, 255, 255), 50); // Cyan
+  MCP39F521_Data data;
+  MCP39F521_FormattedData fData;
   uint8_t byteArray[35];
-  for(int i=0; i < 35; i++){
-    byteArray[i] = 0x55;
+  for(int i=0; i < 35; i++ )
+  {
+    byteArray[i] =0x55;
   }
   int reVal = readMCP32f521(0x00, 0x02, 28, byteArray, 35);
   Serial.print("MCP_FUNC_RETUNE_VAL:"); Serial.println(reVal); 
   if (reVal == 0){
+    Serial.println(Time.timeStr()); 
     Serial.println("Data Avalible");
-    // shortData(&data, byteArray);
-    // convertData(&data, &fData);
-    // printMCP39F521Data(&fData);
+    shortData(&data, byteArray);
+    convertData(&data, &fData);
+    printMCP39F521Data(&fData);
   } else {
      Serial.println("I2C MCP39F521 Error!");
   }
-  Serial.println(" ");
+  Serial.println("-------------------------------- ");
   //LM75A_TEMP_READING();
   delay(1000);
 }

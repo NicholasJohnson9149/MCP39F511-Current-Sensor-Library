@@ -56,6 +56,6 @@
         "__string": "cpp"
     },
     "particle.targetPlatform": "argon",
-    "particle.firmwareVersion": "1.4.4",
+    "particle.firmwareVersion": "2.0.0-rc.1",
     "particle.targetDevice": "AOR-001"
 }
