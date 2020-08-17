@@ -2,7 +2,7 @@
 //  * Project I2C-MCP32F521
 //  * Description: 
 //  * Author: Nicholas 
-//  * Date: Aug 6th 2020 
+//  * Date: Aug 16th 2020 
 //  */
 
 #include "Wire.h"
@@ -17,11 +17,12 @@ SYSTEM_MODE(MANUAL);
 #define PIXEL_COUNT 12
 #define PIXEL_TYPE SK6812RGBW
 #define BRIGHTNESS 50 // 0 - 255
-constexpr size_t I2C_BUFFER_SIZE = 32;
+constexpr size_t I2C_BUFFER_SIZE = 36;
+int _energy_accum_correction_factor = 0;
 int tinkerDigitalWrite(String command);
 void colorWipe(uint32_t c, uint8_t wait);
 uint32_t Wheel(byte WheelPos);
-uint8_t i2c_addr = 0x74;
+//uint8_t i2c_addr = 0x74;
 // Create NeoPixel instance
 Adafruit_NeoPixel strip(PIXEL_COUNT, PIXEL_PIN, PIXEL_TYPE);
 
@@ -83,6 +84,25 @@ typedef struct MCP39F521_FormattedData {
 	float apparentPower;
 } MCP39F521_FormattedData;
 
+void mcp39fBegin(uint8_t _addr)
+{
+  Wire.begin();
+  Wire.setSpeed(CLOCK_SPEED_400KHZ);
+  int retVal = SUCCESS;
+  bool enabled = false;
+  retVal = isEnergyAccumulationEnabled(&enabled);
+  if (retVal == SUCCESS && enabled) {
+    // First, note the accumulation interval. If it is anything
+    // other than the default (2), note the correction
+    // factor that has to be applied to the energy
+    // accumulation.
+    int accumIntervalReg;  
+    retVal = readAccumulationIntervalRegister(&accumIntervalReg);
+    _energy_accum_correction_factor = (accumIntervalReg - 2);
+  }
+  
+}
+
 int checkHeader(int header)
 {
   int error = SUCCESS;
@@ -99,64 +119,97 @@ int checkHeaderAndChecksum( int numBytesToRead, uint8_t *byteArray, int byteArra
 {
   int i;
   uint16_t checksumTotal = 0;
-  
   uint8_t header = byteArray[0];
-  //uint8_t dataLen = byteArray[1];
-  uint8_t checksum = byteArray[numBytesToRead + 3 - 1];
-  
+  uint8_t checksum = byteArray[numBytesToRead + 3 - 1]; // why are we subtracting 1? 
   for (i = 0; i < numBytesToRead + 3 - 1; i++) {
     checksumTotal += byteArray[i];
   }
   uint8_t calculatedChecksum = checksumTotal % 256;
   int error = SUCCESS;
-
   error = checkHeader(header);
-  
   if (calculatedChecksum != checksum) {
     error = ERROR_CHECKSUM_MISMATCH;
   }
-  
   return error;
 }
 
-int readMCP32f521(int addressHigh, int addressLow, int numBytesToRead, uint8_t *byteArray, int byteArraySize)
+int registerReadNBytes(int addressHigh, int addressLow, int numBytesToRead, uint8_t *byteArray, int byteArraySize)
 {
   
   const uint8_t _i2c_device_address = 0x74;
+  int bytesWritten = 0;
   uint8_t checksum = 0; 
-  uint8_t writeData[8]; //= {0xA5, 0x08, 0x41, addressHigh, addressLow, 0x4E, numBytesToRead, 0}
+  uint8_t writeDataCommand[8]; //= {0xA5, 0x08, 0x41, addressHigh, addressLow, 0x4E, numBytesToRead, 0}
+  int i = 0;
+
   if (byteArraySize < numBytesToRead + 3) {
     return ERROR_INSUFFICIENT_ARRAY_SIZE;
   }
-  writeData[0] = 0xA5;
-  writeData[1] = 0x08;
-  writeData[2] = 0x41;
-  writeData[3] = 0x00; //addressHigh;
-  writeData[4] = 0x02; //addressLow;
-  writeData[5] = 0x4E;
-  writeData[6] = 0x20; //numBytesToRead;
-  writeData[7] = 0;
+  uint8_t numBytesBeingRead = numBytesToRead + 3;
+  
+  writeDataCommand[0] = 0xA5;
+  writeDataCommand[1] = 0x08;
+  writeDataCommand[2] = 0x41;
+  writeDataCommand[3] = addressHigh;
+  writeDataCommand[4] = addressLow;
+  writeDataCommand[5] = 0x4E;
+  writeDataCommand[6] = numBytesToRead;
+  writeDataCommand[7] = 0;
   for(int i =0; i<7; i++){
-    checksum += writeData[i];
+    checksum += writeDataCommand[i];
   }
-  writeData[7] = checksum % 256;
+  writeDataCommand[7] = checksum % 256;
+  // Send the Read Command to MCP39F521 Energy Sensor
   Wire.beginTransmission(_i2c_device_address);
-  int bytesWritten = 0;
-  for(int i=0; i<8; i++) {
-    bytesWritten += Wire.write(writeData[i]);
+  for(i=0; i<8; i++) {
+    bytesWritten += Wire.write(writeDataCommand[i]);
   }
-  if(Wire.endTransmission(false)) {return 2;} // Transmission error
-  //delay(10);
-  Wire.requestFrom(WireTransmission(_i2c_device_address).quantity(numBytesToRead+3));//i2c_device_address, (numBytesToRead + 3));
-  int bytesAvailale = Wire.available();
-  int bytesRead = Wire.readBytes((char*)byteArray, numBytesToRead + 4); 
-  for(int i=0; i < numBytesToRead + 4 ; i++ ){
-      Serial.print(byteArray[i], HEX); 
+  int status = Wire.endTransmission(true);
+  wireErrors(status);
+  delay(5);
+  Wire.requestFrom(_i2c_device_address, numBytesBeingRead);
+  int requestDataLength = Wire.available();
+  if (requestDataLength == numBytesBeingRead) {
+    int bytesRead = Wire.readBytes((char*)byteArray, numBytesBeingRead); 
+    for (i = 0; i < numBytesBeingRead ; i++) {
+      Serial.print(byteArray[i], HEX); Serial.print(" ");
+    }
+    Serial.print("\n");
+    Serial.printlnf("bytesAvailale: %d", requestDataLength);
+    Serial.printlnf("bytesRead: %d", bytesRead);
+    // Check header and checksum
+    return checkHeaderAndChecksum(numBytesToRead, byteArray, byteArraySize);      
+  } else {
+    // Unexpected. Handle error  
+    return ERROR_UNEXPECTED_RESPONSE; 
   }
-  Serial.print("\n");
-  Serial.printlnf("bytesAvailale: %d", bytesAvailale);
-  Serial.printlnf("bytesRead: %d", bytesRead);
-  return 0;
+  return SUCCESS;
+}
+
+int readAccumulationIntervalRegister(int *value)
+{
+  int retVal = 0;
+  uint8_t readArray[5];
+  retVal = registerReadNBytes(0x00, 0x9e, 2, readArray, 5);
+  if (retVal != SUCCESS) {
+    return retVal;
+  } else {
+    *value = ((readArray[3] << 8) | readArray[2]);
+  }
+  return SUCCESS;
+}
+
+int isEnergyAccumulationEnabled(bool *enabled)
+{
+  int retVal;
+  uint8_t readArray[5];
+  retVal = registerReadNBytes(0x00, 0xDC, 2, readArray, 5);
+  if (retVal != SUCCESS) {
+    return retVal;
+  } else {
+    *enabled = readArray[2];
+  }
+  return SUCCESS;
 }
 
 void wireErrors(uint8_t i2c_bus_Status){
@@ -218,31 +271,47 @@ int tinkerDigitalWrite(String command)
     else return -3;
 }
 
-void shortData(MCP39F521_Data *data, uint8_t *byteArray)
+int mcpReadData(MCP39F521_Data *output)
 {
-  data->systemStatus = ((byteArray[3] << 8) | byteArray[2]);
-  data->systemVersion = ((byteArray[5] << 8) | byteArray[4]);
-  data->voltageRMS = ((byteArray[7] << 8) | byteArray[6]);
-  data->lineFrequency = ((byteArray[9] << 8) | byteArray[8]);
-  data->analogInputVoltage = ((byteArray[11] << 8) | byteArray[10]);
-  data->powerFactor = (((signed char)byteArray[13] << 8) +
-                          (unsigned char)byteArray[12]);
-  data->currentRMS =      ((uint32_t)(byteArray[17]) << 24 |
-                            (uint32_t)(byteArray[16]) << 16 |
-                            (uint32_t)(byteArray[15]) << 8 |
-                            byteArray[14]);
-  data->activePower =     ((uint32_t)(byteArray[21]) << 24 |
-                            (uint32_t)(byteArray[20]) << 16 |
-                            (uint32_t)(byteArray[19]) << 8 |
-                            byteArray[18]);
-  data->reactivePower =   ((uint32_t)(byteArray[25]) << 24 |
-                            (uint32_t)(byteArray[24]) << 16 |
-                            (uint32_t)(byteArray[23]) << 8 |
-                            byteArray[22]);
-  data->apparentPower =   ((uint32_t)(byteArray[29]) << 24 |
-                            (uint32_t)(byteArray[28]) << 16 |
-                            (uint32_t)(byteArray[27]) << 8 |
-                            byteArray[26]);
+  //uint8_t aucWriteDataBuf[8];
+  uint8_t aucReadDataBuf[35];
+  for(int i=0; i < 35; i++){
+    aucReadDataBuf[i] =0x55;
+  }
+  int retval = SUCCESS;
+  if (output) {
+    // AddressHigh, AddreswLow, NumByteToRead, DataStruct, BufferSize
+    retval = registerReadNBytes(0x00, 0x02, 28, aucReadDataBuf, 35);
+    if (retval != SUCCESS) {
+      return retval;
+    } else {
+      /* System status */
+      output->systemStatus =        ((aucReadDataBuf[3] << 8) | aucReadDataBuf[2]);
+      output->systemVersion =       ((aucReadDataBuf[5] << 8) | aucReadDataBuf[4]);
+      output->voltageRMS =          ((aucReadDataBuf[7] << 8) | aucReadDataBuf[6]);
+      output->lineFrequency =       ((aucReadDataBuf[9] << 8) | aucReadDataBuf[8]);
+      output->analogInputVoltage =  ((aucReadDataBuf[11] << 8) | aucReadDataBuf[10]);
+      output->powerFactor =   (((signed char)aucReadDataBuf[13] << 8) +
+                              (unsigned char)aucReadDataBuf[12]);
+      output->currentRMS =    ((uint32_t)(aucReadDataBuf[17]) << 24 |
+                              (uint32_t)(aucReadDataBuf[16]) << 16 |
+                              (uint32_t)(aucReadDataBuf[15]) << 8 |
+                              aucReadDataBuf[14]);
+      output->activePower =   ((uint32_t)(aucReadDataBuf[21]) << 24 |
+                              (uint32_t)(aucReadDataBuf[20]) << 16 |
+                              (uint32_t)(aucReadDataBuf[19]) << 8 |
+                              aucReadDataBuf[18]);
+      output->reactivePower = ((uint32_t)(aucReadDataBuf[25]) << 24 |
+                              (uint32_t)(aucReadDataBuf[24]) << 16 |
+                              (uint32_t)(aucReadDataBuf[23]) << 8 |
+                              aucReadDataBuf[22]);
+      output->apparentPower = ((uint32_t)(aucReadDataBuf[29]) << 24 |
+                              (uint32_t)(aucReadDataBuf[28]) << 16 |
+                              (uint32_t)(aucReadDataBuf[27]) << 8 |
+                              aucReadDataBuf[26]);
+    }
+  }
+    return 0; 
 }
 
 void convertData(MCP39F521_Data *data, MCP39F521_FormattedData *fData)
@@ -316,14 +385,14 @@ uint32_t Wheel(byte WheelPos) {
 
 void setup() {
   WiFi.off();
-  Serial.begin(115200);
+  Serial.begin(9600);
   // pinMode(D7, OUTPUT);
   // digitalWrite(D7, HIGH);
   // strip.begin();
   // strip.show();
   // strip.setBrightness(20);
-  Wire.setSpeed(CLOCK_SPEED_100KHZ);
-  Wire.begin();
+  // Wire.begin();
+  mcp39fBegin(0x74);
   Particle.function("digitalwrite", tinkerDigitalWrite);
   // if (Particle.connected() == false) {
   //   Particle.connect();
@@ -335,18 +404,10 @@ void loop()
   //colorWipe(strip.Color(255, 255, 255), 50); // Cyan
   MCP39F521_Data data;
   MCP39F521_FormattedData fData;
-  uint8_t byteArray[35];
-  for(int i=0; i < 35; i++ )
-  {
-    byteArray[i] =0x55;
-  }
-  int reVal = readMCP32f521(0x00, 0x02, 28, byteArray, 35);
+  int reVal = mcpReadData(&data); //registerReadNBytes(0x00, 0x02, 29, byteArray, 35);
   Serial.print("MCP_FUNC_RETUNE_VAL:"); Serial.println(reVal); 
   if (reVal == 0){
     Serial.println(Time.timeStr()); 
-    Serial.println("Data Avalible");
-    shortData(&data, byteArray);
-    convertData(&data, &fData);
     printMCP39F521Data(&fData);
   } else {
      Serial.println("I2C MCP39F521 Error!");
