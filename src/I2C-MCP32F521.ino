@@ -10,24 +10,27 @@
 #include "neopixel.h"
 #include <LM75A.h>
 
-SYSTEM_MODE(MANUAL);
-// SYSTEM_MODE(SEMI_AUTOMATIC)
+//SYSTEM_MODE(MANUAL);
+SYSTEM_MODE(AUTOMATIC)
 
 #define PIXEL_PIN D2
 #define PIXEL_COUNT 12
-#define PIXEL_TYPE SK6812RGBW
-#define BRIGHTNESS 50 // 0 - 255
+#define PIXEL_TYPE WS2812B
 constexpr size_t I2C_BUFFER_SIZE = 36;
 int _energy_accum_correction_factor = 0;
 int tinkerDigitalWrite(String command);
+int setNeoBrightness(String command);
 void colorWipe(uint32_t c, uint8_t wait);
 uint32_t Wheel(byte WheelPos);
-//uint8_t i2c_addr = 0x74;
+
 // Create NeoPixel instance
 Adafruit_NeoPixel strip(PIXEL_COUNT, PIXEL_PIN, PIXEL_TYPE);
 
 // Create I2C LM75A instance
 LM75A lm75a_sensor(false, false, false); //A1, A2, A3 LM75A pin state for I2C address 
+
+// constexpr size_t I2C_BUFFER_SIZE = 36;
+// int _energy_accum_correction_factor = 0;
 
 enum error_code {
     SUCCESS = 0,
@@ -43,19 +46,6 @@ enum response_code {
     RESPONSE_ACK = 0x06,
     RESPONSE_NAK = 0x15, 
     RESPONSE_CSFAIL = 0x51
-  };
-
-  enum command_code {
-    COMMAND_REGISTER_READ_N_BYTES = 0x4e,
-    COMMAND_REGISTER_WRITE_N_BYTES = 0x4d,
-    COMMAND_SET_ADDRESS_POINTER = 0x41,
-    COMMAND_SAVE_TO_FLASH = 0x53,
-    COMMAND_PAGE_READ_EEPROM = 0x42,
-    COMMAND_PAGE_WRITE_EEPROM = 0x50,
-    COMMAND_BULK_ERASE_EEPROM = 0x4f,
-    COMMAND_AUTO_CALIBRATE_GAIN = 0x5a,
-    COMMAND_AUTO_CALIBRATE_REACTIVE_GAIN = 0x7a,
-    COMMAND_AUTO_CALIBRATE_FREQUENCY = 0x76
   };
 
 typedef struct MCP39F521_Data {
@@ -84,24 +74,23 @@ typedef struct MCP39F521_FormattedData {
 	float apparentPower;
 } MCP39F521_FormattedData;
 
-void mcp39fBegin(uint8_t _addr)
-{
-  Wire.begin();
-  Wire.setSpeed(CLOCK_SPEED_400KHZ);
-  int retVal = SUCCESS;
-  bool enabled = false;
-  retVal = isEnergyAccumulationEnabled(&enabled);
-  if (retVal == SUCCESS && enabled) {
-    // First, note the accumulation interval. If it is anything
-    // other than the default (2), note the correction
-    // factor that has to be applied to the energy
-    // accumulation.
-    int accumIntervalReg;  
-    retVal = readAccumulationIntervalRegister(&accumIntervalReg);
-    _energy_accum_correction_factor = (accumIntervalReg - 2);
-  }
-  
-}
+// void mcp39fBegin(uint8_t _addr)
+// {
+//   Wire.begin();
+//   Wire.setSpeed(CLOCK_SPEED_400KHZ);
+//   int retVal = SUCCESS;
+//   bool enabled = false;
+//   retVal = isEnergyAccumulationEnabled(&enabled);
+//   if (retVal == SUCCESS && enabled) {
+//     // First, note the accumulation interval. If it is anything
+//     // other than the default (2), note the correction
+//     // factor that has to be applied to the energy
+//     // accumulation.
+//     int accumIntervalReg;  
+//     retVal = readAccumulationIntervalRegister(&accumIntervalReg);
+//     _energy_accum_correction_factor = (accumIntervalReg - 2);
+//   }
+// }
 
 int checkHeader(int header)
 {
@@ -135,54 +124,51 @@ int checkHeaderAndChecksum( int numBytesToRead, uint8_t *byteArray, int byteArra
 
 int registerReadNBytes(int addressHigh, int addressLow, int numBytesToRead, uint8_t *byteArray, int byteArraySize)
 {
-  
   const uint8_t _i2c_device_address = 0x74;
   int bytesWritten = 0;
+  int bytesAvailable = 0;
   uint8_t checksum = 0; 
-  uint8_t writeDataCommand[8]; //= {0xA5, 0x08, 0x41, addressHigh, addressLow, 0x4E, numBytesToRead, 0}
-  int i = 0;
+  uint8_t writeDataCommand[8];
+  uint8_t numBytesBeingRead = numBytesToRead + 3;
 
-  if (byteArraySize < numBytesToRead + 3) {
+  if (byteArraySize < numBytesBeingRead) {
     return ERROR_INSUFFICIENT_ARRAY_SIZE;
   }
-  uint8_t numBytesBeingRead = numBytesToRead + 3;
   
   writeDataCommand[0] = 0xA5;
   writeDataCommand[1] = 0x08;
   writeDataCommand[2] = 0x41;
-  writeDataCommand[3] = addressHigh;
+  writeDataCommand[3] = addressHigh ;
   writeDataCommand[4] = addressLow;
   writeDataCommand[5] = 0x4E;
   writeDataCommand[6] = numBytesToRead;
   writeDataCommand[7] = 0;
-  for(int i =0; i<7; i++){
+  for(int i=0; i<7; i++){
     checksum += writeDataCommand[i];
   }
-  writeDataCommand[7] = checksum % 256;
-  // Send the Read Command to MCP39F521 Energy Sensor
+  writeDataCommand[7] = checksum % 256; 
+  
   Wire.beginTransmission(_i2c_device_address);
-  for(i=0; i<8; i++) {
-    bytesWritten += Wire.write(writeDataCommand[i]);
+  for(int i=0; i<8; i++) {
+    Wire.write(writeDataCommand[i]);
   }
-  int status = Wire.endTransmission(true);
-  wireErrors(status);
-  delay(5);
-  Wire.requestFrom(_i2c_device_address, numBytesBeingRead);
-  int requestDataLength = Wire.available();
-  if (requestDataLength == numBytesBeingRead) {
-    int bytesRead = Wire.readBytes((char*)byteArray, numBytesBeingRead); 
-    for (i = 0; i < numBytesBeingRead ; i++) {
-      Serial.print(byteArray[i], HEX); Serial.print(" ");
-    }
-    Serial.print("\n");
-    Serial.printlnf("bytesAvailale: %d", requestDataLength);
-    Serial.printlnf("bytesRead: %d", bytesRead);
-    // Check header and checksum
-    return checkHeaderAndChecksum(numBytesToRead, byteArray, byteArraySize);      
+  if(Wire.endTransmission()) {
+    return ERROR_INCORRECT_HEADER;
+  }
+  delay(10);
+  if (Wire.requestFrom(_i2c_device_address, numBytesBeingRead)) {
+    bytesAvailable = Wire.available();
+    bytesWritten = Wire.readBytes((char*)byteArray, numBytesBeingRead);
   } else {
-    // Unexpected. Handle error  
-    return ERROR_UNEXPECTED_RESPONSE; 
+    return ERROR_INCORRECT_HEADER;
   }
+  for (int i = 0; i < numBytesBeingRead ; i++) {
+    Serial.print(byteArray[i], HEX); Serial.print(" ");
+  }
+  Serial.print("\n");
+  Serial.printlnf("checksum = %d", writeDataCommand[7]);
+  Serial.printlnf("bytes available = %d", bytesAvailable);
+  Serial.printlnf("bytes read = %d", bytesWritten);
   return SUCCESS;
 }
 
@@ -361,17 +347,22 @@ void LM75A_TEMP_READING()
   }
 }
 
-void colorWipe(uint32_t c, uint8_t wait) {
-  for(uint16_t i=0; i<strip.numPixels(); i++) {
+// Set all pixels in the strip to a solid color, then wait (ms)
+void colorAll(uint32_t c, uint8_t wait) 
+{
+  uint16_t i;
+
+  for(i=0; i<strip.numPixels(); i++) {
     strip.setPixelColor(i, c);
-    strip.show();
-    delay(wait);
   }
+  strip.show();
+  delay(wait);
 }
 
 // Input a value 0 to 255 to get a color value.
 // The colours are a transition r - g - b - back to r.
-uint32_t Wheel(byte WheelPos) {
+uint32_t Wheel(byte WheelPos) 
+{
   if(WheelPos < 85) {
    return strip.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
   } else if(WheelPos < 170) {
@@ -383,17 +374,29 @@ uint32_t Wheel(byte WheelPos) {
   }
 }
 
+int setNeoBrightness(String command)
+{
+  int brightness = command.toInt();;
+  Serial.printlnf("brightness = %d", brightness);
+  strip.setBrightness(brightness);
+  colorAll(strip.Color(0, 255, 255), 50); // Cyan
+  return SUCCESS;
+}
+
 void setup() {
-  WiFi.off();
+  //WiFi.off();
   Serial.begin(9600);
-  // pinMode(D7, OUTPUT);
-  // digitalWrite(D7, HIGH);
-  // strip.begin();
-  // strip.show();
-  // strip.setBrightness(20);
-  // Wire.begin();
-  mcp39fBegin(0x74);
+  pinMode(D7, OUTPUT);
+  digitalWrite(D7, HIGH);
+  strip.begin();
+  strip.show();
+  colorAll(strip.Color(0, 255, 255), 50); // Cyan
+  strip.setBrightness(30);
+  Wire.stretchClock(true);
+  Wire.begin();
+  Wire.setSpeed(CLOCK_SPEED_400KHZ);
   Particle.function("digitalwrite", tinkerDigitalWrite);
+  Particle.function("setbrightness", setNeoBrightness);
   // if (Particle.connected() == false) {
   //   Particle.connect();
   // }
@@ -401,12 +404,11 @@ void setup() {
 
 void loop() 
 { 
-  //colorWipe(strip.Color(255, 255, 255), 50); // Cyan
   MCP39F521_Data data;
   MCP39F521_FormattedData fData;
-  int reVal = mcpReadData(&data); //registerReadNBytes(0x00, 0x02, 29, byteArray, 35);
+  int reVal = mcpReadData(&data);
   Serial.print("MCP_FUNC_RETUNE_VAL:"); Serial.println(reVal); 
-  if (reVal == 0){
+  if (reVal == SUCCESS){
     Serial.println(Time.timeStr()); 
     printMCP39F521Data(&fData);
   } else {
@@ -414,5 +416,5 @@ void loop()
   }
   Serial.println("-------------------------------- ");
   //LM75A_TEMP_READING();
-  delay(1000);
+  delay(500);
 }
