@@ -17,6 +17,7 @@
 #include <LM75A.h>
 
 //SYSTEM_MODE(MANUAL);
+void mcp39fBegin(uint8_t _addr);
 int checkHeader(int header);
 int checkHeaderAndChecksum( int numBytesToRead, uint8_t *byteArray, int byteArraySize);
 int registerReadNBytes(int addressHigh, int addressLow, int numBytesToRead, uint8_t *byteArray, int byteArraySize);
@@ -28,7 +29,7 @@ void colorAll(uint32_t c, uint8_t wait);
 void setup();
 void loop();
 #line 14 "/Users/nicholas/Documents/Particle/I2C-MCP32F521/src/I2C-MCP32F521.ino"
-SYSTEM_MODE(AUTOMATIC)
+SYSTEM_MODE(AUTOMATIC);
 
 #define PIXEL_PIN D2
 #define PIXEL_COUNT 12
@@ -91,23 +92,23 @@ typedef struct MCP39F521_FormattedData {
 	float apparentPower;
 } MCP39F521_FormattedData;
 
-// void mcp39fBegin(uint8_t _addr)
-// {
-//   Wire.begin();
-//   Wire.setSpeed(CLOCK_SPEED_400KHZ);
-//   int retVal = SUCCESS;
-//   bool enabled = false;
-//   retVal = isEnergyAccumulationEnabled(&enabled);
-//   if (retVal == SUCCESS && enabled) {
-//     // First, note the accumulation interval. If it is anything
-//     // other than the default (2), note the correction
-//     // factor that has to be applied to the energy
-//     // accumulation.
-//     int accumIntervalReg;  
-//     retVal = readAccumulationIntervalRegister(&accumIntervalReg);
-//     _energy_accum_correction_factor = (accumIntervalReg - 2);
-//   }
-// }
+void mcp39fBegin(uint8_t _addr)
+{
+  Wire.begin();
+  Wire.setSpeed(CLOCK_SPEED_100KHZ);
+  int retVal = SUCCESS;
+  bool enabled = false;
+  retVal = isEnergyAccumulationEnabled(&enabled);
+  if (retVal == SUCCESS && enabled) {
+    // First, note the accumulation interval. If it is anything
+    // other than the default (2), note the correction
+    // factor that has to be applied to the energy
+    // accumulation.
+    int accumIntervalReg;  
+    retVal = readAccumulationIntervalRegister(&accumIntervalReg);
+    _energy_accum_correction_factor = (accumIntervalReg - 2);
+  }
+}
 
 int checkHeader(int header)
 {
@@ -151,7 +152,7 @@ int registerReadNBytes(int addressHigh, int addressLow, int numBytesToRead, uint
   if (byteArraySize < numBytesBeingRead) {
     return ERROR_INSUFFICIENT_ARRAY_SIZE;
   }
-  
+
   writeDataCommand[0] = 0xA5;
   writeDataCommand[1] = 0x08;
   writeDataCommand[2] = 0x41;
@@ -317,7 +318,7 @@ int mcpReadData(MCP39F521_Data *output)
     return 0; 
 }
 
-void convertData(MCP39F521_Data *data, MCP39F521_FormattedData *fData)
+void convertRawData(MCP39F521_Data *data, MCP39F521_FormattedData *fData)
 {
   fData->voltageRMS = data->voltageRMS/10.0f;
   fData->currentRMS = data->currentRMS/10000.0f;
@@ -409,27 +410,21 @@ void setup() {
   strip.show();
   colorAll(strip.Color(0, 255, 255), 50); // Cyan
   strip.setBrightness(30);
-  Wire.stretchClock(true);
-  Wire.begin();
-  Wire.setSpeed(CLOCK_SPEED_400KHZ);
+  mcp39fBegin(0x74);
   Particle.function("digitalwrite", tinkerDigitalWrite);
   Particle.function("setbrightness", setNeoBrightness);
-  // if (Particle.connected() == false) {
-  //   Particle.connect();
-  // }
 }
 
 void loop() 
 { 
   MCP39F521_Data data;
   MCP39F521_FormattedData fData;
-  int reVal = mcpReadData(&data);
-  Serial.print("MCP_FUNC_RETUNE_VAL:"); Serial.println(reVal); 
-  if (reVal == SUCCESS){
-    Serial.println(Time.timeStr()); 
+  int readMCPretval = mcpReadData(&data);
+   if (readMCPretval == SUCCESS) {                  
+    convertRawData(&data, &fData);
     printMCP39F521Data(&fData);
   } else {
-     Serial.println("I2C MCP39F521 Error!");
+    Serial.print("Error returned! "); Serial.println(readMCPretval);
   }
   Serial.println("-------------------------------- ");
   //LM75A_TEMP_READING();
