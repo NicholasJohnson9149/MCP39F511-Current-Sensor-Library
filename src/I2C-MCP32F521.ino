@@ -10,8 +10,8 @@
 #include "neopixel.h"
 #include <LM75A.h>
 
-//SYSTEM_MODE(MANUAL);
-SYSTEM_MODE(AUTOMATIC);
+SYSTEM_MODE(MANUAL);
+//SYSTEM_MODE(AUTOMATIC);
 
 #define PIXEL_PIN D2
 #define PIXEL_COUNT 12
@@ -125,8 +125,8 @@ int checkHeaderAndChecksum( int numBytesToRead, uint8_t *byteArray, int byteArra
 int registerReadNBytes(int addressHigh, int addressLow, int numBytesToRead, uint8_t *byteArray, int byteArraySize)
 {
   const uint8_t _i2c_device_address = 0x74;
-  int bytesWritten = 0;
-  int bytesAvailable = 0;
+  int numberBytesRead = 0;
+  // int bytesAvailable = 0;
   uint8_t checksum = 0; 
   uint8_t writeDataCommand[8];
   uint8_t numBytesBeingRead = numBytesToRead + 3;
@@ -155,21 +155,39 @@ int registerReadNBytes(int addressHigh, int addressLow, int numBytesToRead, uint
   if(Wire.endTransmission()) {
     return ERROR_INCORRECT_HEADER;
   }
-  delay(10);
-  if (Wire.requestFrom(_i2c_device_address, numBytesBeingRead)) {
-    bytesAvailable = Wire.available();
-    bytesWritten = Wire.readBytes((char*)byteArray, numBytesBeingRead);
+  delay(2);
+  Wire.requestFrom(_i2c_device_address, (uint8_t)(numBytesBeingRead));
+  int requestDataLength = Wire.available();
+  if (requestDataLength==(numBytesBeingRead)) {
+    numberBytesRead = Wire.readBytes((char*)byteArray, numBytesBeingRead);
+    for (int i = 0; i < numBytesBeingRead ; i++) {
+      Serial.print(byteArray[i], HEX); Serial.print(" ");
+    }
+    Serial.print("\n");
+    Serial.printlnf("bytes read = %d", numberBytesRead);
+    // Check header and checksum
+    return checkHeaderAndChecksum(numBytesToRead, byteArray, byteArraySize);      
+    
   } else {
-    return ERROR_INCORRECT_HEADER;
+    // Unexpected. Handle error  
+    return ERROR_UNEXPECTED_RESPONSE; 
   }
-  for (int i = 0; i < numBytesBeingRead ; i++) {
-    Serial.print(byteArray[i], HEX); Serial.print(" ");
-  }
-  Serial.print("\n");
-  Serial.printlnf("checksum = %d", writeDataCommand[7]);
-  Serial.printlnf("bytes available = %d", bytesAvailable);
-  Serial.printlnf("bytes read = %d", bytesWritten);
+
   return SUCCESS;
+  // if (Wire.requestFrom(_i2c_device_address, numBytesBeingRead)) {
+  //   bytesAvailable = Wire.available();
+  //   bytesWritten = Wire.readBytes((char*)byteArray, numBytesBeingRead);
+  // } else {
+  //   return ERROR_INCORRECT_HEADER;
+  // }
+  // for (int i = 0; i < numBytesBeingRead ; i++) {
+  //   Serial.print(byteArray[i], HEX); Serial.print(" ");
+  // }
+  // Serial.print("\n");
+  // Serial.printlnf("checksum = %d", writeDataCommand[7]);
+  // Serial.printlnf("bytes available = %d", bytesAvailable);
+  // Serial.printlnf("bytes read = %d", bytesWritten);
+  // return SUCCESS;
 }
 
 int readAccumulationIntervalRegister(int *value)
@@ -297,7 +315,7 @@ int mcpReadData(MCP39F521_Data *output)
                               aucReadDataBuf[26]);
     }
   }
-    return 0; 
+    return retval; 
 }
 
 void convertRawData(MCP39F521_Data *data, MCP39F521_FormattedData *fData)
@@ -305,35 +323,52 @@ void convertRawData(MCP39F521_Data *data, MCP39F521_FormattedData *fData)
   fData->voltageRMS = data->voltageRMS/10.0f;
   fData->currentRMS = data->currentRMS/10000.0f;
   fData->lineFrequency = data->lineFrequency/1000.0f;
-  // Analog Input Voltage represents ADC data for 10 bit ADC
+  // Analog Input Voltage represents ADC output for 10 bit ADC
   // By trial, it's been found that it has a ref voltage of 3.3v
   // So the register value/1023 * 3.3v will give the analog input voltage in volts.
   // analogInputVoltage = RegData/1023.0 * 3.3;
   // Do this on the application side?  
   fData->analogInputVoltage = data->analogInputVoltage/1023.0f*3.3;
+
   float f;
   unsigned char ch;
+  
   f = ((data->powerFactor & 0x8000)>>15) * -1.0;
+  
   for(ch=14; ch > 3; ch--)
     f += ((data->powerFactor & (1 << ch)) >> ch) * 1.0 / (1 << (15 - ch));
+
   fData->powerFactor = f;
+
   fData->activePower = data->activePower/100.0f;
   fData->reactivePower = data->reactivePower/100.0f;
   fData->apparentPower = data->apparentPower/100.0f;
 }
 
+
 void printMCP39F521Data(MCP39F521_FormattedData *data)
 {
-  Serial.printlnf("systemStatus = %d", data->systemStatus, 4);
-  Serial.printlnf("systemVersion = %d", data->systemVersion, 4);
-  Serial.printlnf("Voltage = %d", data->voltageRMS, 4);
-  Serial.printlnf("Current = %d", data->currentRMS, 4);
-  Serial.printlnf("Line Frequency = %d", data->lineFrequency, 4);
-  Serial.printlnf("Analog Input Voltage = %d", data->analogInputVoltage, 4);
-  Serial.printlnf("Power Factor = %d", data->powerFactor, 4);
-  Serial.printlnf("Active Power = %d", data->activePower, 4);
-  Serial.printlnf("Reactive Power = %d", data->reactivePower, 4);
-  Serial.printlnf("Apparent Power = %d", data->apparentPower, 4);
+  // Serial.printlnf("systemStatus = %d", data->systemStatus, 4);
+  // Serial.printlnf("systemVersion = %d", data->systemVersion, 4);
+  // Serial.printlnf("Voltage = %d", data->voltageRMS, 4);
+  // Serial.printlnf("Current = %d", data->currentRMS, 4);
+  // Serial.printlnf("Line Frequency = %d", data->lineFrequency, 4);
+  // Serial.printlnf("Analog Input Voltage = %d", data->analogInputVoltage, 4);
+  // Serial.printlnf("Power Factor = %d", data->powerFactor, 4);
+  // Serial.printlnf("Active Power = %d", data->activePower, 4);
+  // Serial.printlnf("Reactive Power = %d", data->reactivePower, 4);
+  // Serial.printlnf("Apparent Power = %d", data->apparentPower, 4);
+  // Serial.println("------------------------------------------------");
+  Serial.print(F("systemStatus = ")); Serial.println(data->systemStatus, 4);
+  Serial.print(F("systemVersion = ")); Serial.println(data->systemVersion, 4);
+  Serial.print(F("Voltage = ")); Serial.println(data->voltageRMS, 4);
+  Serial.print(F("Current = ")); Serial.println(data->currentRMS, 4);
+  Serial.print(F("Line Frequency = ")); Serial.println(data->lineFrequency, 4);
+  Serial.print("Analog Input Voltage = "); Serial.println(data->analogInputVoltage, 4);
+  Serial.print(F("Power Factor = ")); Serial.println(data->powerFactor, 4);
+  Serial.print(F("Active Power = ")); Serial.println(data->activePower, 4);
+  Serial.print(F("Reactive Power = ")); Serial.println(data->reactivePower, 4);
+  Serial.print(F("Apparent Power = ")); Serial.println(data->apparentPower, 4);
 }
 
 void LM75A_TEMP_READING()
@@ -385,6 +420,7 @@ int setNeoBrightness(String command)
 
 void setup() {
   //WiFi.off();
+  Cellular.off();
   Serial.begin(9600);
   pinMode(D7, OUTPUT);
   digitalWrite(D7, HIGH);
