@@ -4,37 +4,35 @@
 
 #include "Particle.h"
 #line 1 "/Users/nicholas/Documents/Particle/I2C-MCP32F521/src/I2C-MCP32F521.ino"
-// /*
-//  * Project I2C-MCP32F521
-//  * Description: 
-//  * Author: Nicholas 
-//  * Date: Aug 16th 2020 
-//  */
+/*
+ * Project I2C-MCP32F521
+ * Description: 
+ * Author: Nicholas 
+ * Date: Aug 16th 2020 
+ */
 
-#include "Wire.h"
-#include "particle.h"
+// #include "particle.h"
 #include "neopixel.h"
 #include <LM75A.h>
 
-void mcp39fBegin(uint8_t _addr);
 int checkHeader(int header);
 int checkHeaderAndChecksum( int numBytesToRead, uint8_t *byteArray, int byteArraySize);
 int registerReadNBytes(int addressHigh, int addressLow, int numBytesToRead, uint8_t *byteArray, int byteArraySize);
 int readAccumulationIntervalRegister(int *value);
 int isEnergyAccumulationEnabled(bool *enabled);
-void wireErrors(uint8_t i2c_bus_Status);
 void LM75A_TEMP_READING();
 void colorAll(uint32_t c, uint8_t wait);
 void setup();
 void loop();
-#line 13 "/Users/nicholas/Documents/Particle/I2C-MCP32F521/src/I2C-MCP32F521.ino"
+#line 12 "/Users/nicholas/Documents/Particle/I2C-MCP32F521/src/I2C-MCP32F521.ino"
 SYSTEM_MODE(MANUAL);
 //SYSTEM_MODE(AUTOMATIC);
+
+SerialLogHandler logHandler;
 
 #define PIXEL_PIN D2
 #define PIXEL_COUNT 12
 #define PIXEL_TYPE WS2812B
-constexpr size_t I2C_BUFFER_SIZE = 36;
 int _energy_accum_correction_factor = 0;
 int tinkerDigitalWrite(String command);
 int setNeoBrightness(String command);
@@ -46,9 +44,6 @@ Adafruit_NeoPixel strip(PIXEL_COUNT, PIXEL_PIN, PIXEL_TYPE);
 
 // Create I2C LM75A instance
 LM75A lm75a_sensor(false, false, false); //A1, A2, A3 LM75A pin state for I2C address 
-
-// constexpr size_t I2C_BUFFER_SIZE = 36;
-// int _energy_accum_correction_factor = 0;
 
 enum error_code {
     SUCCESS = 0,
@@ -92,23 +87,6 @@ typedef struct MCP39F521_FormattedData {
 	float apparentPower;
 } MCP39F521_FormattedData;
 
-void mcp39fBegin(uint8_t _addr)
-{
-  Wire.begin();
-  Wire.setSpeed(CLOCK_SPEED_100KHZ);
-  int retVal = SUCCESS;
-  bool enabled = false;
-  retVal = isEnergyAccumulationEnabled(&enabled);
-  if (retVal == SUCCESS && enabled) {
-    // First, note the accumulation interval. If it is anything
-    // other than the default (2), note the correction
-    // factor that has to be applied to the energy
-    // accumulation.
-    int accumIntervalReg;  
-    retVal = readAccumulationIntervalRegister(&accumIntervalReg);
-    _energy_accum_correction_factor = (accumIntervalReg - 2);
-  }
-}
 
 int checkHeader(int header)
 {
@@ -142,70 +120,56 @@ int checkHeaderAndChecksum( int numBytesToRead, uint8_t *byteArray, int byteArra
 
 int registerReadNBytes(int addressHigh, int addressLow, int numBytesToRead, uint8_t *byteArray, int byteArraySize)
 {
-  const uint8_t _i2c_device_address = 0x74;
-  int numberBytesRead = 0;
-  // int bytesAvailable = 0;
+  // int numberBytesRead = 0;
+  // uint8_t checksum = 0; 
+  // uint8_t writeDataCommand[8];
+  //uint8_t numBytesBeingRead = numBytesToRead + 3;
+
+  // if (byteArraySize < numBytesBeingRead) {
+  //   return ERROR_INSUFFICIENT_ARRAY_SIZE;
+  // }
+
+  // writeDataCommand[0] = 0xA5;
+  // writeDataCommand[1] = 0x08;
+  // writeDataCommand[2] = 0x41;
+  // writeDataCommand[3] = addressHigh;
+  // writeDataCommand[4] = addressLow;
+  // writeDataCommand[5] = 0x4E;
+  // writeDataCommand[6] = 0x20; //numBytesToRead;
+  // writeDataCommand[7] = 0;
+
   uint8_t checksum = 0; 
-  uint8_t writeDataCommand[8];
-  uint8_t numBytesBeingRead = numBytesToRead + 3;
+  uint8_t writeDataCommand[8] = {0xA5,0x08,0x41,addressHigh,addressLow,0x4E,numBytesToRead,0x00};
 
-  if (byteArraySize < numBytesBeingRead) {
-    return ERROR_INSUFFICIENT_ARRAY_SIZE;
-  }
-
-  writeDataCommand[0] = 0xA5;
-  writeDataCommand[1] = 0x08;
-  writeDataCommand[2] = 0x41;
-  writeDataCommand[3] = addressHigh ;
-  writeDataCommand[4] = addressLow;
-  writeDataCommand[5] = 0x4E;
-  writeDataCommand[6] = numBytesToRead;
-  writeDataCommand[7] = 0;
   for(int i=0; i<7; i++){
     checksum += writeDataCommand[i];
   }
   writeDataCommand[7] = checksum % 256; 
-  
-  Wire.beginTransmission(_i2c_device_address);
+
   for(int i=0; i<8; i++) {
-    Wire.write(writeDataCommand[i]);
-  }
-  if(Wire.endTransmission()) {
-    return ERROR_INCORRECT_HEADER;
-  }
-  delay(2);
-  Wire.requestFrom(_i2c_device_address, (uint8_t)(numBytesBeingRead));
-  int requestDataLength = Wire.available();
-  if (requestDataLength==(numBytesBeingRead)) {
-    numberBytesRead = Wire.readBytes((char*)byteArray, numBytesBeingRead);
-    for (int i = 0; i < numBytesBeingRead ; i++) {
-      Serial.print(byteArray[i], HEX); Serial.print(" ");
-    }
-    Serial.print("\n");
-    Serial.printlnf("bytes read = %d", numberBytesRead);
-    // Check header and checksum
-    return checkHeaderAndChecksum(numBytesToRead, byteArray, byteArraySize);      
-    
-  } else {
-    // Unexpected. Handle error  
-    return ERROR_UNEXPECTED_RESPONSE; 
+    Serial1.write(writeDataCommand[i]);
   }
 
-  return SUCCESS;
-  // if (Wire.requestFrom(_i2c_device_address, numBytesBeingRead)) {
-  //   bytesAvailable = Wire.available();
-  //   bytesWritten = Wire.readBytes((char*)byteArray, numBytesBeingRead);
-  // } else {
-  //   return ERROR_INCORRECT_HEADER;
-  // }
-  // for (int i = 0; i < numBytesBeingRead ; i++) {
-  //   Serial.print(byteArray[i], HEX); Serial.print(" ");
-  // }
-  // Serial.print("\n");
-  // Serial.printlnf("checksum = %d", writeDataCommand[7]);
-  // Serial.printlnf("bytes available = %d", bytesAvailable);
-  // Serial.printlnf("bytes read = %d", bytesWritten);
-  // return SUCCESS;
+  int bytesToRead = Serial1.available();
+  while(Serial1.available()){
+    Serial1.readBytes((char*)byteArray, bytesToRead); 
+    // for(int i=0; i <bytesToRead ; i++){
+    //   Serial.print(byteArray[i]); Serial.println(" ");
+    // }
+    // Serial.println("\n");
+    if(digitalRead(D7)) {
+      digitalWrite(D7,LOW);
+    } else {
+      digitalWrite(D7,HIGH);
+    }
+  }
+  Log.info("Bytes Available : %d", bytesToRead);
+  
+  if(bytesToRead <= 0)
+  {
+    return ERROR_UNEXPECTED_RESPONSE; 
+  }
+  return SUCCESS; //checkHeaderAndChecksum(numBytesToRead, byteArray, byteArraySize);      
 }
 
 int readAccumulationIntervalRegister(int *value)
@@ -232,22 +196,6 @@ int isEnergyAccumulationEnabled(bool *enabled)
     *enabled = readArray[2];
   }
   return SUCCESS;
-}
-
-void wireErrors(uint8_t i2c_bus_Status){
-  if(i2c_bus_Status == 0){
-    Serial.printlnf("I2C bus Status Success = %d", i2c_bus_Status);
-  }else if(i2c_bus_Status == 1){
-    Serial.printlnf("Busy timeout upon entering endTransmission() = %d", i2c_bus_Status);
-  }else if(i2c_bus_Status == 2){
-    Serial.printlnf("Start bit generation timeout = %d", i2c_bus_Status);
-  }else if(i2c_bus_Status == 3){
-    Serial.printlnf("end of address transmission timeout = %d", i2c_bus_Status);
-  }else if(i2c_bus_Status == 4){
-    Serial.printlnf("Data byte transfer timeout =  %d", i2c_bus_Status);
-  }else if(i2c_bus_Status == 5){
-    Serial.printlnf("Data byte transfer succeeded, busy timeout immediately after = %d", i2c_bus_Status);
-  }
 }
 
 int tinkerDigitalWrite(String command)
@@ -366,17 +314,6 @@ void convertRawData(MCP39F521_Data *data, MCP39F521_FormattedData *fData)
 
 void printMCP39F521Data(MCP39F521_FormattedData *data)
 {
-  // Serial.printlnf("systemStatus = %d", data->systemStatus, 4);
-  // Serial.printlnf("systemVersion = %d", data->systemVersion, 4);
-  // Serial.printlnf("Voltage = %d", data->voltageRMS, 4);
-  // Serial.printlnf("Current = %d", data->currentRMS, 4);
-  // Serial.printlnf("Line Frequency = %d", data->lineFrequency, 4);
-  // Serial.printlnf("Analog Input Voltage = %d", data->analogInputVoltage, 4);
-  // Serial.printlnf("Power Factor = %d", data->powerFactor, 4);
-  // Serial.printlnf("Active Power = %d", data->activePower, 4);
-  // Serial.printlnf("Reactive Power = %d", data->reactivePower, 4);
-  // Serial.printlnf("Apparent Power = %d", data->apparentPower, 4);
-  // Serial.println("------------------------------------------------");
   Serial.print(F("systemStatus = ")); Serial.println(data->systemStatus, 4);
   Serial.print(F("systemVersion = ")); Serial.println(data->systemVersion, 4);
   Serial.print(F("Voltage = ")); Serial.println(data->voltageRMS, 4);
@@ -396,7 +333,9 @@ void LM75A_TEMP_READING()
   if (temperature_in_degrees == INVALID_LM75A_TEMPERATURE) {
     Serial.println("Error while getting temperature");
   } else {
-    Serial.printlnf("LM75 Temperature in degrees = %d", temperature_in_degrees, " degrees (%d", LM75A::degreesToFahrenheit(temperature_in_degrees), " fahrenheit)");
+    LM75A::degreesToFahrenheit(temperature_in_degrees);
+    Serial.print("LM75 Temperature in degrees = "); Serial.print(temperature_in_degrees); Serial.println(" F");
+    // Serial.printlnf("LM75 Temperature in degrees = %d", temperature_in_degrees, " degrees (%d", LM75A::degreesToFahrenheit(temperature_in_degrees), temperature_in_degrees
   }
 }
 
@@ -437,16 +376,15 @@ int setNeoBrightness(String command)
 }
 
 void setup() {
-  //WiFi.off();
   Cellular.off();
-  Serial.begin(9600);
+  Serial.begin();
+  Serial1.begin(9600);
   pinMode(D7, OUTPUT);
   digitalWrite(D7, HIGH);
   strip.begin();
   strip.show();
   colorAll(strip.Color(0, 255, 255), 50); // Cyan
   strip.setBrightness(30);
-  mcp39fBegin(0x74);
   Particle.function("digitalwrite", tinkerDigitalWrite);
   Particle.function("setbrightness", setNeoBrightness);
 }
@@ -464,5 +402,66 @@ void loop()
   }
   Serial.println("-------------------------------- ");
   //LM75A_TEMP_READING();
+  delay(1000);
+}
+
+
+/* ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+SYSTEM_MODE(MANUAL);
+SerialLogHandler logHandler;
+
+bool sendByte = false;
+int  bytes = 0;
+
+void send() {
+  sendByte = true;
+}
+
+Timer timer(1000, send);
+// setup() runs once, when the device is first turned on.
+
+void setup() {
+  Cellular.off();
+  Serial.begin();
+  Serial1.begin(9600);
+  timer.start();
+  pinMode(D7,OUTPUT);
+  delay(10);
+}
+
+// loop() runs over and over again, as quickly as it can execute.
+void loop() {
+
+  // int writeDataCommand[8];
+  uint8_t byteArray[35];
+  uint8_t checksum = 0; 
+  uint8_t writeDataCommand[8] = {0xA5,0x08,0x41,0x00,0x02,0x4E,0x20,0x00};
+
+  for(int i=0; i<7; i++){
+    checksum += writeDataCommand[i];
+  }
+  writeDataCommand[7] = checksum % 256; 
+
+  for(int i=0; i<8; i++) {
+    Serial1.write(writeDataCommand[i]);
+  }
+  
+  int bytesToRead = Serial1.available();
+  while(Serial1.available()){
+    Serial1.readBytes((char*)byteArray, bytesToRead); 
+    // for(int i=0; i <bytesToRead ; i++){
+    //   Serial.print(byteArray[i]); Serial.println(" ");
+    // }
+    // Serial.println("\n");
+    if(digitalRead(D7)) {
+      digitalWrite(D7,LOW);
+    } else {
+      digitalWrite(D7,HIGH);
+    }
+  }
+  Log.info("Bytes Available : %d", bytesToRead);
+  //Serial.flush();
   delay(500);
 }
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*/
+
