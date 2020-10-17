@@ -11,7 +11,7 @@
  * Date: Aug 16th 2020 
  */
 
-// #include "particle.h"
+#include "particle.h"
 #include "neopixel.h"
 #include <LM75A.h>
 
@@ -26,8 +26,7 @@ void setup();
 void loop();
 #line 12 "/Users/nicholas/Documents/Particle/I2C-MCP32F521/src/I2C-MCP32F521.ino"
 SYSTEM_MODE(MANUAL);
-//SYSTEM_MODE(AUTOMATIC);
-
+// SYSTEM_MODE(AUTOMATIC);
 SerialLogHandler logHandler;
 
 #define PIXEL_PIN D2
@@ -120,26 +119,21 @@ int checkHeaderAndChecksum( int numBytesToRead, uint8_t *byteArray, int byteArra
 
 int registerReadNBytes(int addressHigh, int addressLow, int numBytesToRead, uint8_t *byteArray, int byteArraySize)
 {
-  // int numberBytesRead = 0;
-  // uint8_t checksum = 0; 
-  // uint8_t writeDataCommand[8];
-  //uint8_t numBytesBeingRead = numBytesToRead + 3;
+  uint8_t checksum = 0; 
+  uint8_t writeDataCommand[8];
 
   // if (byteArraySize < numBytesBeingRead) {
   //   return ERROR_INSUFFICIENT_ARRAY_SIZE;
   // }
 
-  // writeDataCommand[0] = 0xA5;
-  // writeDataCommand[1] = 0x08;
-  // writeDataCommand[2] = 0x41;
-  // writeDataCommand[3] = addressHigh;
-  // writeDataCommand[4] = addressLow;
-  // writeDataCommand[5] = 0x4E;
-  // writeDataCommand[6] = 0x20; //numBytesToRead;
-  // writeDataCommand[7] = 0;
-
-  uint8_t checksum = 0; 
-  uint8_t writeDataCommand[8] = {0xA5,0x08,0x41,addressHigh,addressLow,0x4E,numBytesToRead,0x00};
+  writeDataCommand[0] = 0xA5;
+  writeDataCommand[1] = 0x08;
+  writeDataCommand[2] = 0x41;
+  writeDataCommand[3] = addressHigh;
+  writeDataCommand[4] = addressLow;
+  writeDataCommand[5] = 0x4E;
+  writeDataCommand[6] = 0x20; //numBytesToRead;
+  writeDataCommand[7] = 0;
 
   for(int i=0; i<7; i++){
     checksum += writeDataCommand[i];
@@ -401,7 +395,7 @@ void loop()
     Serial.print("Error returned! "); Serial.println(readMCPretval);
   }
   Serial.println("-------------------------------- ");
-  //LM75A_TEMP_READING();
+  // LM75A_TEMP_READING();
   delay(1000);
 }
 

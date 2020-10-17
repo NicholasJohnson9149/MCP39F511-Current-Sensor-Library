@@ -5,13 +5,12 @@
  * Date: Aug 16th 2020 
  */
 
-// #include "particle.h"
+#include "particle.h"
 #include "neopixel.h"
 #include <LM75A.h>
 
 SYSTEM_MODE(MANUAL);
-//SYSTEM_MODE(AUTOMATIC);
-
+// SYSTEM_MODE(AUTOMATIC);
 SerialLogHandler logHandler;
 
 #define PIXEL_PIN D2
@@ -107,9 +106,9 @@ int registerReadNBytes(int addressHigh, int addressLow, int numBytesToRead, uint
   uint8_t checksum = 0; 
   uint8_t writeDataCommand[8];
 
-  if (byteArraySize < numBytesBeingRead) {
-    return ERROR_INSUFFICIENT_ARRAY_SIZE;
-  }
+  // if (byteArraySize < numBytesBeingRead) {
+  //   return ERROR_INSUFFICIENT_ARRAY_SIZE;
+  // }
 
   writeDataCommand[0] = 0xA5;
   writeDataCommand[1] = 0x08;
@@ -380,7 +379,7 @@ void loop()
     Serial.print("Error returned! "); Serial.println(readMCPretval);
   }
   Serial.println("-------------------------------- ");
-  //LM75A_TEMP_READING();
+  // LM75A_TEMP_READING();
   delay(1000);
 }
 
