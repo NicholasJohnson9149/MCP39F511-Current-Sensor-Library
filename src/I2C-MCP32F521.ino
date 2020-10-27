@@ -1,6 +1,6 @@
 /*
  * Project I2C-MCP32F521
- * Description: Devcie Applciation for MCP39F511 + Partcile Cloud 
+ * Description: Devcie Test Applciation for MCP39F511 + Partcile Cloud 
  * Author: Nicholas 
  * Date Created: Aug 16th 2020 
  * Last Updated: Oct 24rd 2020 
