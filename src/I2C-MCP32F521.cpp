@@ -23,8 +23,10 @@ int registerWriteNBytes(int addressHigh, int addressLow, int numBytes, uint8_t *
 int readAccumulationIntervalRegister(int *value);
 int isEnergyAccumulationEnabled(bool *enabled);
 int setEventConfigurationRegister(uint32_t value);
-int mcpSetUp ();
-void LM75A_TEMP_READING();
+int issueAckNackCommand(int command);
+int saveToFlash();
+int factoryReset();
+int LM75A_TEMP_READING();
 void colorAll(uint32_t c, uint8_t wait);
 void setup();
 void loop();
@@ -43,7 +45,7 @@ int tinkerDigitalWrite(String command);
 int setNeoBrightness(String command);
 void colorWipe(uint32_t c, uint8_t wait);
 uint32_t Wheel(byte WheelPos);
-
+int reset_status = 1;
 // Create NeoPixel instance
 Adafruit_NeoPixel strip(PIXEL_COUNT, PIXEL_PIN, PIXEL_TYPE);
 
@@ -57,7 +59,8 @@ enum error_code {
     ERROR_UNEXPECTED_RESPONSE = 3,
     ERROR_INSUFFICIENT_ARRAY_SIZE = 4,
     ERROR_CHECKSUM_MISMATCH = 5,
-    ERROR_SET_VALUE_MISMATCH = 6
+    ERROR_SET_VALUE_MISMATCH = 6,
+    ERROR_I2C_TEMP_READING =7
   };
 
 enum response_code {
@@ -141,9 +144,9 @@ int registerReadNBytes(int addressHigh, int addressLow, int numBytesToRead, uint
   uint8_t checksum = 0; 
   uint8_t writeDataCommand[8];
 
-  // if (byteArraySize < numBytesBeingRead) {
-  //   return ERROR_INSUFFICIENT_ARRAY_SIZE;
-  // }
+  if (byteArraySize < numBytesToRead + 3) {
+    return ERROR_INSUFFICIENT_ARRAY_SIZE;
+  }
 
   writeDataCommand[0] = 0xA5;
   writeDataCommand[1] = 0x08;
@@ -199,7 +202,7 @@ int registerWriteNBytes(int addressHigh, int addressLow, int numBytes, uint8_t *
   }
   // i should have been incremented so is the last element here
   aucWriteDataBuf[7] = checksumTotal % 256;
-  for(int i=0; i< (numBytes+8); i++) {
+  for(int i=0; i < (numBytes+8); i++) {
     Serial1.write(aucWriteDataBuf[i]);
   }
   aucReadDataBuf[0] = Serial1.readBytes((char*)aucWriteDataBuf, (uint8_t)1); 
@@ -320,10 +323,59 @@ int tinkerDigitalWrite(String command)
     else return -3;
 }
 
-int mcpSetUp ()
+// Some commands are issued and just return an ACK (or NAK)
+// This method factors out those types of commands
+// and takes in as argument the specified command to issue.
+ 
+int issueAckNackCommand(int command)
 {
-  printf("MCP Setup ");
-  return 9;
+  uint8_t aucWriteDataBuf[4];
+  uint8_t aucReadDataBuf[1];
+
+  aucWriteDataBuf[0] = 0xa5; // Header
+  aucWriteDataBuf[1] = 0x04; // Num bytes
+  aucWriteDataBuf[2] = command; // Command
+  aucWriteDataBuf[3] = (0xa5 + 0x04 + command) % 256; // checksum
+
+  for(int i=0; i< 4; i++) {
+    Serial1.write(aucWriteDataBuf[i]);
+  }
+  delay(100);
+  //
+  // Read the ack
+  //
+  while(Serial1.available()){
+    Serial1.readBytes((char*)aucReadDataBuf, (uint8_t)1); 
+    uint8_t header = aucReadDataBuf[0];
+    return checkHeader(header);
+  }
+  return SUCCESS;  
+}
+
+int saveToFlash()
+{
+  return issueAckNackCommand(COMMAND_SAVE_TO_FLASH);
+}
+
+int factoryReset()
+{
+  int retVal = 0;
+  uint8_t byteArray[2];
+  byteArray[0] = 0xa5;
+  byteArray[1] = 0xa5;
+
+  retVal = registerWriteNBytes(0x00, 0x5e, 2, byteArray);
+  Serial.print("Error wirte Reset Regester! "); Serial.println(retVal);
+  if (retVal != SUCCESS) {
+    return retVal;
+  }
+
+  retVal = saveToFlash();
+  if (retVal != SUCCESS) {
+    return retVal;
+  }
+
+  return SUCCESS;
 }
 
 int mcpReadData(MCP39F521_Data *output)
@@ -400,22 +452,24 @@ void printMCP39F521Data(MCP39F521_FormattedData *data)
   Serial.print(F("Voltage = ")); Serial.println(data->voltageRMS, 4);
   Serial.print(F("Current = ")); Serial.println(data->currentRMS, 4);
   Serial.print(F("Line Frequency = ")); Serial.println(data->lineFrequency, 4);
-  Serial.print("Analog Input Voltage = "); Serial.println(data->analogInputVoltage, 4);
+  Serial.print(F("Analog Input Voltage = ")); Serial.println(data->analogInputVoltage, 4);
   Serial.print(F("Power Factor = ")); Serial.println(data->powerFactor, 4);
   Serial.print(F("Active Power = ")); Serial.println(data->activePower, 4);
   Serial.print(F("Reactive Power = ")); Serial.println(data->reactivePower, 4);
   Serial.print(F("Apparent Power = ")); Serial.println(data->apparentPower, 4);
 }
 
-void LM75A_TEMP_READING()
+int LM75A_TEMP_READING()
 {
   float temperature_in_degrees = lm75a_sensor.getTemperatureInDegrees();
 
   if (temperature_in_degrees == INVALID_LM75A_TEMPERATURE) {
-    Serial.println("Error while getting temperature");
+    Serial.println("Error while getting temperature.");
+    return ERROR_I2C_TEMP_READING;
   } else {
     LM75A::degreesToFahrenheit(temperature_in_degrees);
     Serial.print("LM75 Temperature in degrees = "); Serial.print(temperature_in_degrees); Serial.println(" F");
+    return SUCCESS;
     // Serial.printlnf("LM75 Temperature in degrees = %d", temperature_in_degrees, " degrees (%d", LM75A::degreesToFahrenheit(temperature_in_degrees), temperature_in_degrees
   }
 }
@@ -473,19 +527,19 @@ void setup() {
 
 void loop() 
 { 
-  // setEventConfigurationRegister(0);
-  // delay(250);
-
   MCP39F521_Data data;
   MCP39F521_FormattedData fData;
-  Serial.println("-------------------------------- ");
-  int readMCPretval = mcpReadData(&data);
-   if (readMCPretval == SUCCESS) {                  
-    convertRawData(&data, &fData);
-    printMCP39F521Data(&fData);
-  } else {
-    Serial.print("Error returned! "); Serial.println(readMCPretval);
+  if(reset_status == 0)
+  {
+    Serial.println("-------------------------------- ");
+    int readMCPretval = mcpReadData(&data);
+    if (readMCPretval == SUCCESS) {                  
+      convertRawData(&data, &fData);
+      printMCP39F521Data(&fData);
+    } else {
+      Serial.print("Error returned! "); Serial.println(readMCPretval);
+    }
+    LM75A_TEMP_READING();
+    delay(500);
   }
-  LM75A_TEMP_READING();
-  delay(500);
 }

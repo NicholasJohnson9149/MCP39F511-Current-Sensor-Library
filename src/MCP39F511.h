@@ -232,7 +232,7 @@
 //                       // remove any calibration data. Use with extreme caution!!!!
 //   int Orange_MCP39F511::resetCalibration(calibration_config cc = CALIBRATION_CONFIG_4A );
 
-//   // END --- WARNING!!! WARNING!!! WARNING!!!
+//   
 
 
 // private:
