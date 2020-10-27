@@ -3,12 +3,13 @@
 /******************************************************/
 
 #include "Particle.h"
-#line 1 "/Users/nicholas/Documents/Particle/I2C-MCP32F521/src/I2C-MCP32F521.ino"
+#line 1 "/Users/nicholas/Documents/Orange-Charger/Orange-Hardware/MCP39F521_Test_Code/src/I2C-MCP32F521.ino"
 /*
  * Project I2C-MCP32F521
- * Description: 
+ * Description: Devcie Applciation for MCP39F511 + Partcile Cloud 
  * Author: Nicholas 
- * Date: Aug 16th 2020 
+ * Date Created: Aug 16th 2020 
+ * Last Updated: Oct 24rd 2020 
  */
 
 #include "particle.h"
@@ -18,13 +19,16 @@
 int checkHeader(int header);
 int checkHeaderAndChecksum( int numBytesToRead, uint8_t *byteArray, int byteArraySize);
 int registerReadNBytes(int addressHigh, int addressLow, int numBytesToRead, uint8_t *byteArray, int byteArraySize);
+int registerWriteNBytes(int addressHigh, int addressLow, int numBytes, uint8_t *byteArray);
 int readAccumulationIntervalRegister(int *value);
 int isEnergyAccumulationEnabled(bool *enabled);
+int setEventConfigurationRegister(uint32_t value);
+int mcpSetUp ();
 void LM75A_TEMP_READING();
 void colorAll(uint32_t c, uint8_t wait);
 void setup();
 void loop();
-#line 12 "/Users/nicholas/Documents/Particle/I2C-MCP32F521/src/I2C-MCP32F521.ino"
+#line 13 "/Users/nicholas/Documents/Orange-Charger/Orange-Hardware/MCP39F521_Test_Code/src/I2C-MCP32F521.ino"
 SYSTEM_MODE(MANUAL);
 // SYSTEM_MODE(AUTOMATIC);
 SerialLogHandler logHandler;
@@ -32,6 +36,8 @@ SerialLogHandler logHandler;
 #define PIXEL_PIN D2
 #define PIXEL_COUNT 12
 #define PIXEL_TYPE WS2812B
+#define TOUCH_SENSOR D3 
+
 int _energy_accum_correction_factor = 0;
 int tinkerDigitalWrite(String command);
 int setNeoBrightness(String command);
@@ -86,6 +92,19 @@ typedef struct MCP39F521_FormattedData {
 	float apparentPower;
 } MCP39F521_FormattedData;
 
+enum command_code {
+    COMMAND_REGISTER_READ_N_BYTES = 0x4E,
+    COMMAND_REGISTER_WRITE_N_BYTES = 0x4D,
+    COMMAND_SET_ADDRESS_POINTER = 0x41,
+    COMMAND_SAVE_TO_FLASH = 0x53,
+    COMMAND_PAGE_READ_EEPROM = 0x42,
+    COMMAND_PAGE_WRITE_EEPROM = 0x50,
+    COMMAND_BULK_ERASE_EEPROM = 0x4F,
+    COMMAND_AUTO_CALIBRATE_GAIN = 0x5A,
+    COMMAND_AUTO_CALIBRATE_REACTIVE_GAIN = 0x7A,
+    COMMAND_AUTO_CALIBRATE_FREQUENCY = 0x76
+  };
+
 
 int checkHeader(int header)
 {
@@ -128,11 +147,11 @@ int registerReadNBytes(int addressHigh, int addressLow, int numBytesToRead, uint
 
   writeDataCommand[0] = 0xA5;
   writeDataCommand[1] = 0x08;
-  writeDataCommand[2] = 0x41;
+  writeDataCommand[2] = COMMAND_SET_ADDRESS_POINTER;
   writeDataCommand[3] = addressHigh;
   writeDataCommand[4] = addressLow;
-  writeDataCommand[5] = 0x4E;
-  writeDataCommand[6] = 0x20; //numBytesToRead;
+  writeDataCommand[5] = COMMAND_REGISTER_READ_N_BYTES;
+  writeDataCommand[6] = numBytesToRead; //numBytesToRead or 20;
   writeDataCommand[7] = 0;
 
   for(int i=0; i<7; i++){
@@ -147,23 +166,45 @@ int registerReadNBytes(int addressHigh, int addressLow, int numBytesToRead, uint
   int bytesToRead = Serial1.available();
   while(Serial1.available()){
     Serial1.readBytes((char*)byteArray, bytesToRead); 
-    // for(int i=0; i <bytesToRead ; i++){
-    //   Serial.print(byteArray[i]); Serial.println(" ");
-    // }
-    // Serial.println("\n");
-    if(digitalRead(D7)) {
-      digitalWrite(D7,LOW);
-    } else {
-      digitalWrite(D7,HIGH);
-    }
   }
   Log.info("Bytes Available : %d", bytesToRead);
-  
   if(bytesToRead <= 0)
   {
     return ERROR_UNEXPECTED_RESPONSE; 
   }
-  return SUCCESS; //checkHeaderAndChecksum(numBytesToRead, byteArray, byteArraySize);      
+  return SUCCESS;//checkHeaderAndChecksum(numBytesToRead, byteArray, byteArraySize);
+}
+
+int registerWriteNBytes(int addressHigh, int addressLow, int numBytes, uint8_t *byteArray)
+{
+  uint8_t aucWriteDataBuf[35];
+  uint8_t aucReadDataBuf[1];
+  uint32_t checksumTotal = 0;
+
+  aucWriteDataBuf[0] = 0xA5; // Header
+  aucWriteDataBuf[1] = numBytes + 8; // Num bytes in frame
+  aucWriteDataBuf[2] = COMMAND_SET_ADDRESS_POINTER; // Command - set address pointer
+  aucWriteDataBuf[3] = addressHigh; // Address high
+  aucWriteDataBuf[4] = addressLow; // Address low - design config registers
+  aucWriteDataBuf[5] = COMMAND_REGISTER_WRITE_N_BYTES; // Command - write register, N bytes
+  aucWriteDataBuf[6] = numBytes; // Num bytes of data
+  // Data here ...
+  for(int i=7; i<7+numBytes; i++) {
+    aucWriteDataBuf[i] = byteArray[i-7];
+  }
+  // i should have been incremented so is the last element here
+  aucWriteDataBuf[7] = 0; // Checksum - computed below
+  for(int i=0; i<numBytes+7;i++) {
+    checksumTotal += aucWriteDataBuf[i];
+  }
+  // i should have been incremented so is the last element here
+  aucWriteDataBuf[7] = checksumTotal % 256;
+  for(int i=0; i< (numBytes+8); i++) {
+    Serial1.write(aucWriteDataBuf[i]);
+  }
+  aucReadDataBuf[0] = Serial1.readBytes((char*)aucWriteDataBuf, (uint8_t)1); 
+  uint8_t header = aucReadDataBuf[0];
+  return checkHeader(header);
 }
 
 int readAccumulationIntervalRegister(int *value)
@@ -189,6 +230,50 @@ int isEnergyAccumulationEnabled(bool *enabled)
   } else {
     *enabled = readArray[2];
   }
+  return SUCCESS;
+}
+
+// Set the event configuration register to the appropriate value
+//
+// First, read the existing register value. Then, set (or clear) appropriate
+// bits using the event_config enum for assitance. Lastly, set the
+// new value back in the register.
+//
+// For example, bitSet(eventConfigRegisterValue, EVENT_VSAG_PIN)
+// to turn on the event notification for VSAG events
+
+int setEventConfigurationRegister(uint32_t value)
+{
+  int retVal = 0;
+  uint8_t byteArray[4];
+  uint8_t readArray[7];
+  uint32_t readValue;
+  byteArray[0] = value & 0xFF;
+  byteArray[1] = (value >> 8) & 0xFF;
+  byteArray[2] = (value >> 16) & 0xFF;
+  byteArray[3] = (value >> 24) & 0xFF;
+
+  retVal = registerReadNBytes(0x00, 0x7e, 4, readArray, 7);
+  if (retVal != SUCCESS) {
+    return retVal;
+  } else {
+    readValue = ((uint32_t)(readArray[5] << 24) | (uint32_t)(readArray[4] << 16) |
+                 (uint32_t)(readArray[3] << 8) | readArray[2]);
+  }
+
+  retVal = registerWriteNBytes(0x00, 0x7e, 4, byteArray);
+  if (retVal != SUCCESS) {
+    return retVal;
+  }
+
+  retVal = registerReadNBytes(0x00, 0x7e, 4, readArray, 7);
+  readValue = ((uint32_t)(readArray[5] << 24) | (uint32_t)(readArray[4] << 16) |
+               (uint32_t)(readArray[3] << 8) | readArray[2]);
+
+  if (readValue != value) {
+    return ERROR_SET_VALUE_MISMATCH;
+  }
+
   return SUCCESS;
 }
 
@@ -233,6 +318,12 @@ int tinkerDigitalWrite(String command)
     }
 #endif
     else return -3;
+}
+
+int mcpSetUp ()
+{
+  printf("MCP Setup ");
+  return 9;
 }
 
 int mcpReadData(MCP39F521_Data *output)
@@ -289,17 +380,13 @@ void convertRawData(MCP39F521_Data *data, MCP39F521_FormattedData *fData)
   // analogInputVoltage = RegData/1023.0 * 3.3;
   // Do this on the application side?  
   fData->analogInputVoltage = data->analogInputVoltage/1023.0f*3.3;
-
   float f;
   unsigned char ch;
-  
   f = ((data->powerFactor & 0x8000)>>15) * -1.0;
   
   for(ch=14; ch > 3; ch--)
     f += ((data->powerFactor & (1 << ch)) >> ch) * 1.0 / (1 << (15 - ch));
-
   fData->powerFactor = f;
-
   fData->activePower = data->activePower/100.0f;
   fData->reactivePower = data->reactivePower/100.0f;
   fData->apparentPower = data->apparentPower/100.0f;
@@ -373,20 +460,25 @@ void setup() {
   Cellular.off();
   Serial.begin();
   Serial1.begin(9600);
-  pinMode(D7, OUTPUT);
-  digitalWrite(D7, HIGH);
+  pinMode(D7, INPUT);
+  pinMode(TOUCH_SENSOR, INPUT);
   strip.begin();
   strip.show();
   colorAll(strip.Color(0, 255, 255), 50); // Cyan
   strip.setBrightness(30);
   Particle.function("digitalwrite", tinkerDigitalWrite);
   Particle.function("setbrightness", setNeoBrightness);
+
 }
 
 void loop() 
 { 
+  // setEventConfigurationRegister(0);
+  // delay(250);
+
   MCP39F521_Data data;
   MCP39F521_FormattedData fData;
+  Serial.println("-------------------------------- ");
   int readMCPretval = mcpReadData(&data);
    if (readMCPretval == SUCCESS) {                  
     convertRawData(&data, &fData);
@@ -394,68 +486,6 @@ void loop()
   } else {
     Serial.print("Error returned! "); Serial.println(readMCPretval);
   }
-  Serial.println("-------------------------------- ");
-  // LM75A_TEMP_READING();
-  delay(1000);
-}
-
-
-/* ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-SYSTEM_MODE(MANUAL);
-SerialLogHandler logHandler;
-
-bool sendByte = false;
-int  bytes = 0;
-
-void send() {
-  sendByte = true;
-}
-
-Timer timer(1000, send);
-// setup() runs once, when the device is first turned on.
-
-void setup() {
-  Cellular.off();
-  Serial.begin();
-  Serial1.begin(9600);
-  timer.start();
-  pinMode(D7,OUTPUT);
-  delay(10);
-}
-
-// loop() runs over and over again, as quickly as it can execute.
-void loop() {
-
-  // int writeDataCommand[8];
-  uint8_t byteArray[35];
-  uint8_t checksum = 0; 
-  uint8_t writeDataCommand[8] = {0xA5,0x08,0x41,0x00,0x02,0x4E,0x20,0x00};
-
-  for(int i=0; i<7; i++){
-    checksum += writeDataCommand[i];
-  }
-  writeDataCommand[7] = checksum % 256; 
-
-  for(int i=0; i<8; i++) {
-    Serial1.write(writeDataCommand[i]);
-  }
-  
-  int bytesToRead = Serial1.available();
-  while(Serial1.available()){
-    Serial1.readBytes((char*)byteArray, bytesToRead); 
-    // for(int i=0; i <bytesToRead ; i++){
-    //   Serial.print(byteArray[i]); Serial.println(" ");
-    // }
-    // Serial.println("\n");
-    if(digitalRead(D7)) {
-      digitalWrite(D7,LOW);
-    } else {
-      digitalWrite(D7,HIGH);
-    }
-  }
-  Log.info("Bytes Available : %d", bytesToRead);
-  //Serial.flush();
+  LM75A_TEMP_READING();
   delay(500);
 }
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*/
-

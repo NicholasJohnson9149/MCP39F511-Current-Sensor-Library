@@ -56,6 +56,6 @@
         "__string": "cpp"
     },
     "particle.targetPlatform": "boron",
-    "particle.firmwareVersion": "2.0.0-rc.1",
-    "particle.targetDevice": "BOC-002"
+    "particle.firmwareVersion": "2.0.0-rc.3",
+    "particle.targetDevice": "ORO-7-002"
 }
