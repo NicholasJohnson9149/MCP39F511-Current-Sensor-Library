@@ -1,6 +1,13 @@
-# I2C-MCP32F521
+# I2C-MCP32F521 
 
-A Particle project named I2C-MCP32F521
+ORO-7 
+Rev 7 of Orange Outlet's PCBA test code
+
+Test Code for Orange Charger INC. all right reserved non production. This repo is used to share issues found when collecting energy data from the MCP39f511A. 
+
+The MCP39F521 is a highly integrated, complete single-phase power-monitoring device, designed for real-time measurement of input power for AC/DC power supplies, power distribution units, consumer and industrial applications. It includes dual-channel delta-sigma ADCs, a 16-bit calculation engine, EEPROM and a flexible two-wire I2C interface. An integrated low-drift voltage reference with 10 ppm/°C in addition to 94.5 dB of signal-to-noise and distortion ratio (SINAD) performance on each measurement channel allows for better than 0.1% accurate designs across a 4000:1 dynamic range.
+
+Link to [datasheet](http://ww1.microchip.com/downloads/en/DeviceDoc/20005442A)
 
 ## Welcome to your project!
 

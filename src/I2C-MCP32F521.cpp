@@ -6,7 +6,7 @@
 #line 1 "/Users/nicholas/Documents/Orange-Charger/Orange-Hardware/MCP39F521_Test_Code/src/I2C-MCP32F521.ino"
 /*
  * Project I2C-MCP32F521
- * Description: Devcie Applciation for MCP39F511 + Partcile Cloud 
+ * Description: Devcie Test Applciation for MCP39F511 + Partcile Cloud 
  * Author: Nicholas 
  * Date Created: Aug 16th 2020 
  * Last Updated: Oct 24rd 2020 
@@ -522,15 +522,14 @@ void setup() {
   strip.setBrightness(30);
   Particle.function("digitalwrite", tinkerDigitalWrite);
   Particle.function("setbrightness", setNeoBrightness);
-
 }
 
 void loop() 
 { 
+  factoryReset();
+  delay(200);
   MCP39F521_Data data;
   MCP39F521_FormattedData fData;
-  if(reset_status == 0)
-  {
     Serial.println("-------------------------------- ");
     int readMCPretval = mcpReadData(&data);
     if (readMCPretval == SUCCESS) {                  
@@ -541,5 +540,4 @@ void loop()
     }
     LM75A_TEMP_READING();
     delay(500);
-  }
 }

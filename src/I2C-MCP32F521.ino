@@ -343,7 +343,7 @@ int factoryReset()
   byteArray[0] = 0xa5;
   byteArray[1] = 0xa5;
 
-  retVal = registerWriteNBytes(0x00, 0x5e, 2, byteArray);
+  retVal = registerWriteNBytes(0x00, 0x5E, 2, byteArray);
   Serial.print("Error wirte Reset Regester! "); Serial.println(retVal);
   if (retVal != SUCCESS) {
     return retVal;
@@ -501,15 +501,14 @@ void setup() {
   strip.setBrightness(30);
   Particle.function("digitalwrite", tinkerDigitalWrite);
   Particle.function("setbrightness", setNeoBrightness);
-
 }
 
 void loop() 
 { 
+  factoryReset();
+  delay(200);
   MCP39F521_Data data;
   MCP39F521_FormattedData fData;
-  if(reset_status == 0)
-  {
     Serial.println("-------------------------------- ");
     int readMCPretval = mcpReadData(&data);
     if (readMCPretval == SUCCESS) {                  
@@ -520,5 +519,4 @@ void loop()
     }
     LM75A_TEMP_READING();
     delay(500);
-  }
 }
